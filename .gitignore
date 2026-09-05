@@ -1,0 +1,22 @@
+# ── Machine-local configuration ─────────────────────────────────────────────
+# .env holds this machine's DB/server credentials — never commit it.
+# .env.example IS the committed template.
+.env
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ── Database exports (large generated .sql dumps) ───────────────────────────
+database/exports/
+
+# ── Local caches / runtime state ────────────────────────────────────────────
+.freebuff/
+f1_cache/
+ml_models/
+*.log
+
+# ── Reference docs (large binaries, not source) ───────────────────────────
+Trackshift_*
