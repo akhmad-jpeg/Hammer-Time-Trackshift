@@ -17,6 +17,3 @@ database/exports/
 f1_cache/
 ml_models/
 *.log
-
-# ── Reference docs (large binaries, not source) ───────────────────────────
-Trackshift_*
