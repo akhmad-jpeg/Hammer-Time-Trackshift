@@ -653,6 +653,65 @@
         .es-btn.active { color:#151515; background:#ffd700; border-color:#ffd700; }
         .es-msg { font-family:'Share Tech Mono',monospace; font-size:0.64em; letter-spacing:0.5px; color:#8ee6a8; margin-left:6px; white-space:nowrap; }
         .es-msg.err { color:#ff6b6b; }
+
+        /* HAMMER TIME — modular collapsible deck. Every control of the old stacked
+           panels is kept; advanced sections simply fold under their headers. */
+        .ht-mod { margin-bottom:16px; border:1px solid var(--border); border-radius:6px; background:var(--bg2); overflow:hidden; }
+        .ht-mod.open .ht-head::after { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--red); }
+        .ht-head {
+            position:relative; width:100%; display:flex; align-items:center; gap:16px;
+            padding:13px 20px; background:transparent; border:0; cursor:pointer;
+            text-align:left; font:inherit; color:inherit; transition:background .15s;
+        }
+        .ht-head:hover { background:rgba(255,255,255,0.03); }
+        body.light-mode .ht-head:hover { background:rgba(0,0,0,0.03); }
+        .ht-idx { font-family:'Share Tech Mono',monospace; font-size:0.66em; letter-spacing:1px; color:var(--red); border:1px solid rgba(225,6,0,0.4); border-radius:3px; padding:2px 7px; flex-shrink:0; }
+        .ht-titles { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; }
+        .ht-title { font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:0.96em; letter-spacing:3px; text-transform:uppercase; color:var(--text); }
+        .ht-title .ht-adv { display:inline-block; font-size:0.55em; letter-spacing:2px; color:var(--gold); border:1px solid rgba(255,215,0,0.35); border-radius:2px; padding:1px 5px; margin-left:8px; vertical-align:2px; }
+        .ht-sub { font-family:'Share Tech Mono',monospace; font-size:0.62em; letter-spacing:1px; color:var(--muted); }
+        .ht-chev { font-size:0.85em; color:var(--muted); transition:transform .18s; flex-shrink:0; }
+        .ht-mod:not(.open) .ht-chev { transform:rotate(-90deg); }
+        .ht-body { display:none; padding:18px 22px 24px; border-top:1px solid var(--border); }
+        .ht-mod.open .ht-body { display:block; }
+        .ht-cols { margin-bottom:2px; }
+        .ht-cols .field { margin-bottom:12px; }
+        .ht-gaprow { display:grid; grid-template-columns:minmax(0,1fr) 240px; gap:14px; align-items:start; margin-top:6px; }
+        .ht-presets { display:flex; gap:6px; margin-top:6px; }
+        .ht-preset {
+            background:var(--bg3); border:1px solid var(--border); border-radius:3px; color:var(--muted);
+            font-family:'Barlow Condensed',sans-serif; font-size:0.68em; letter-spacing:1.5px;
+            padding:2px 11px; cursor:pointer; transition:all .12s;
+        }
+        .ht-preset:hover { color:var(--text); border-color:rgba(255,255,255,0.22); }
+        body.light-mode .ht-preset:hover { border-color:rgba(0,0,0,0.25); }
+        .ht-steps { display:flex; flex-wrap:wrap; gap:6px 8px; margin:4px 0 14px; }
+        .ht-step {
+            font-family:'Share Tech Mono',monospace; font-size:0.62em; letter-spacing:1px; color:var(--muted);
+            background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:3px; padding:4px 9px;
+        }
+        .ht-step b { color:var(--text); font-weight:400; }
+        body.light-mode .ht-step { background:rgba(0,0,0,0.03); }
+        .ht-hint { margin:10px 0 14px; font-family:'Share Tech Mono',monospace; font-size:0.64em; letter-spacing:1px; line-height:1.75; color:var(--muted); }
+        .ht-hint summary { cursor:pointer; user-select:none; list-style:none; color:#9aa; }
+        .ht-hint summary::-webkit-details-marker { display:none; }
+        .ht-hint summary:hover { color:var(--text); }
+        .ht-hint[open] summary { color:var(--teal); }
+        .ht-hint p { margin:8px 0 0; }
+        .ht-resolved { margin:2px 0 10px; }
+        .ht-labgrid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .ht-labgrid .field { margin-bottom:11px; }
+        .ht-subcard { border:1px solid var(--border); border-radius:5px; padding:15px 17px; background:rgba(255,255,255,0.015); min-width:0; }
+        body.light-mode .ht-subcard { background:rgba(0,0,0,0.02); }
+        .ht-subcard-t { display:flex; align-items:baseline; gap:8px; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:0.78em; letter-spacing:2px; text-transform:uppercase; color:var(--text); margin-bottom:14px; }
+        .ht-subcard-t .ht-tag { font-family:'Share Tech Mono',monospace; font-weight:400; font-size:0.68em; letter-spacing:1px; text-transform:none; color:var(--muted); }
+        @media(max-width:1180px) { .ht-labgrid, .ht-gaprow { grid-template-columns:1fr; } }
+        @media(max-width:900px) {
+            .ht-head { padding:11px 14px; gap:10px; }
+            .ht-title { font-size:0.82em; }
+            .ht-sub { white-space:normal; }
+            .ht-body { padding:14px 14px 18px; }
+        }
     </style>
 </head>
 <body>
@@ -980,197 +1039,297 @@
 
 <!-- TAB: HAMMER TIME (what-if tab) -->
 <div id="tab-whatif" class="tab-panel">
-    <div class="panel red">
-        <div class="panel-title">Energy Modes <span style="opacity:0.45;font-weight:400">(synthetic 2026 ERS)</span></div>
-        <div class="two-col" style="gap:12px;margin-bottom:0">
-            <div class="field">
-                <label>Session ID</label>
-                <input type="number" id="e-session" min="1" value="78">
-            </div>
-            <div class="field">
-                <label>Current Lap</label>
-                <input type="number" id="e-lap" min="1" value="10">
-            </div>
-            <div class="field">
-                <label>Battery Now (MJ) — blank = auto</label>
-                <input type="number" id="e-batt" min="0" max="4" step="0.25" placeholder="auto from trace (ES usable = 4 MJ)">
-            </div>
-        </div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#777;margin-bottom:12px">Compares Push / Balanced / Lift&nbsp;&amp;&nbsp;Coast deployment over the laps remaining in that session. Battery "now" defaults to the stored energy trace at the chosen lap (full store if none).</div>
-        <button class="action-btn" onclick="runEnergyCompare()">ANALYZE ENERGY MODES</button>
-        <div class="err-box" id="energy-err"></div>
-        <div id="energy-whatif-out"></div>
-    </div>
 
-    <div class="panel red" style="margin-top:24px">
-        <div class="panel-title">Energy Sandbox <span style="opacity:0.45;font-weight:400">(synthetic ERS · PPT module 02)</span></div>
-        <div class="two-col" style="gap:12px;margin-bottom:0">
-            <div class="field">
-                <label>Session ID</label>
-                <input type="number" id="sb-session" min="1" value="78">
-            </div>
-            <div class="field">
-                <label>Lap</label>
-                <input type="number" id="sb-lap" min="1" value="10">
-            </div>
-            <div class="field">
-                <label>Baseline Mode</label>
-                <select id="sb-mode">
-                    <option value="balanced" selected>Balanced</option>
-                    <option value="push">Push</option>
-                    <option value="liftcoast">Lift &amp; Coast</option>
-                </select>
-            </div>
-            <div class="field">
-                <label>Battery Now (MJ) — blank = auto</label>
-                <input type="number" id="sb-batt" min="0" max="4" step="0.25" placeholder="auto from trace">
-            </div>
-        </div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#777;margin:10px 0 2px">Per-sector deploy-delta sliders. The mode sets the lap's deploy envelope; deltas <b>reallocate</b> it between S1/S2/S3 (zero-sum). The 2026 PU has <b>no fixed per-lap deploy quota</b> — deployment is store-limited bursts (ceiling 8.5 MJ/lap). Watch for battery-floor and FIA-cap warnings.</div>
-        <div class="sb-sliders">
-            <div class="sb-row"><label>S1</label><input type="range" id="sb-d1" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v1">+0.00</span></div>
-            <div class="sb-row"><label>S2</label><input type="range" id="sb-d2" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v2">+0.00</span></div>
-            <div class="sb-row"><label>S3</label><input type="range" id="sb-d3" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v3">+0.00</span></div>
-        </div>
-        <div class="sb-sum" id="sb-sum">&Sigma; &Delta; = +0.00 MJ &middot; lap budget fixed &mdash; deltas reallocate within it (live recalc)</div>
-        <button class="action-btn" onclick="runSandbox()">SIMULATE SECTOR SHIFT</button>
-        <div class="err-box" id="sb-err"></div>
-        <div id="sb-out"></div>
-    </div>
-
-    <div class="panel red" style="margin-top:24px">
-        <div class="panel-title">RACE CALL <span style="opacity:0.45;font-weight:400">(strategy co-pilot — one scenario in, one definitive call out)</span></div>
-        <div class="two-col" style="gap:12px;margin-bottom:0">
-            <div class="field">
-                <label>Leader (car ahead)</label>
-                <select id="ov-leader"><option value="">Loading drivers...</option></select>
-            </div>
-            <div class="field">
-                <label>Chaser (car behind)</label>
-                <select id="ov-chaser"><option value="">Loading drivers...</option></select>
-            </div>
-            <div class="field">
-                <label>Race / Track</label>
-                <select id="ov-track"><option value="">Loading tracks...</option></select>
-            </div>
-            <div class="field">
-                <label>Year</label>
-                <input type="number" id="ov-year" value="2026">
-            </div>
-        </div>
-        <div class="two-col" style="gap:12px;margin-bottom:0">
-            <div class="field" style="grid-column:span 2">
-                <label>Gap delta — <span id="ov-gap-val" style="color:#ffd700">0.8s</span></label>
-                <div class="call-gap-row">
-                    <input type="range" id="ov-gap" min="0.1" max="20" step="0.1" value="0.8"
-                           oninput="document.getElementById('ov-gap-val').textContent=this.value+'s'">
-                    <span class="call-gap-val">0.8s</span>
+    <!-- MODULE 01 · RACE CALL (the primary flow; open by default) -->
+    <div class="ht-mod open" id="ht-racecall">
+        <button type="button" class="ht-head" aria-expanded="true" onclick="htToggle('ht-racecall',this)">
+            <span class="ht-idx">01</span>
+            <span class="ht-titles">
+                <span class="ht-title">Race Call</span>
+                <span class="ht-sub">Live race co-pilot — current tyre state + gap in, one forward-projection call out</span>
+            </span>
+            <span class="ht-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="ht-body">
+            <div class="two-col ht-cols">
+                <div class="field">
+                    <label>Leader (car ahead)</label>
+                    <select id="ov-leader"><option value="">Loading drivers...</option></select>
                 </div>
-                <div style="display:flex;gap:6px;margin-top:4px">
-                    <button type="button" style="font-size:0.6em;padding:1px 8px;background:#1c1c24;color:#ccc;border:1px solid #ffffff22;border-radius:3px;cursor:pointer" onclick="document.getElementById('ov-gap').value='0.5';document.getElementById('ov-gap-val').textContent='0.5s'">0.5s</button>
-                    <button type="button" style="font-size:0.6em;padding:1px 8px;background:#1c1c24;color:#ccc;border:1px solid #ffffff22;border-radius:3px;cursor:pointer" onclick="document.getElementById('ov-gap').value='1.0';document.getElementById('ov-gap-val').textContent='1.0s'">1.0s</button>
-                    <button type="button" style="font-size:0.6em;padding:1px 8px;background:#1c1c24;color:#ccc;border:1px solid #ffffff22;border-radius:3px;cursor:pointer" onclick="document.getElementById('ov-gap').value='1.5';document.getElementById('ov-gap-val').textContent='1.5s'">1.5s</button>
-                    <button type="button" style="font-size:0.6em;padding:1px 8px;background:#1c1c24;color:#ccc;border:1px solid #ffffff22;border-radius:3px;cursor:pointer" onclick="document.getElementById('ov-gap').value='3.0';document.getElementById('ov-gap-val').textContent='3.0s'">3.0s</button>
+                <div class="field">
+                    <label>Chaser (car behind)</label>
+                    <select id="ov-chaser"><option value="">Loading drivers...</option></select>
+                </div>
+                <div class="field">
+                    <label>Race / Track</label>
+                    <select id="ov-track"><option value="">Loading tracks...</option></select>
+                </div>
+                <div class="field">
+                    <label>Season</label>
+                    <input type="number" id="ov-year" value="2026" title="Era level for the models — the live call always uses each driver's career (aggregate) model, not a stored race">
                 </div>
             </div>
-            <div class="field">
-                <label>Current lap</label>
-                <input type="number" id="ov-lap" min="1" value="1">
+            <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin:8px 0 4px">LIVE TYRE STATE — what each car is on RIGHT NOW</div>
+            <div class="two-col ht-cols">
+                <div class="field">
+                    <label>Leader tyre</label>
+                    <select id="ov-ltyre"></select>
+                </div>
+                <div class="field">
+                    <label>Leader tyre age (laps)</label>
+                    <input type="number" id="ov-lage" min="0" value="12">
+                </div>
+                <div class="field">
+                    <label>Chaser tyre</label>
+                    <select id="ov-ctyre"></select>
+                </div>
+                <div class="field">
+                    <label>Chaser tyre age (laps)</label>
+                    <input type="number" id="ov-cage" min="0" value="8">
+                </div>
             </div>
+            <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin:10px 0 2px">CHASER ERS — per-sector deploy deltas, the only energy lever a wall can pull (leader assumed Balanced)</div>
+            <div class="field" style="margin:0 0 6px">
+                <div class="ht-presets" style="margin-bottom:8px">
+                    <button type="button" class="ht-preset" onclick="setOvErsShape(-0.05,-0.05,-0.05)">Lift &amp; Coast −</button>
+                    <button type="button" class="ht-preset" onclick="setOvErsShape(0,0,0)">Balanced</button>
+                    <button type="button" class="ht-preset" onclick="setOvErsShape(0.05,0.05,0.05)">Push +</button>
+                </div>
+                <div class="sb-sliders">
+                    <div class="sb-row"><label>S1</label><input type="range" id="ov-d1" min="-2" max="2" step="0.05" value="0" oninput="ovSectorInput()"><span class="sb-val" id="ov-v1">+0.00</span></div>
+                    <div class="sb-row"><label>S2</label><input type="range" id="ov-d2" min="-2" max="2" step="0.05" value="0" oninput="ovSectorInput()"><span class="sb-val" id="ov-v2">+0.00</span></div>
+                    <div class="sb-row"><label>S3</label><input type="range" id="ov-d3" min="-2" max="2" step="0.05" value="0" oninput="ovSectorInput()"><span class="sb-val" id="ov-v3">+0.00</span></div>
+                </div>
+                <div class="sb-sum" id="ov-sum">Σ Δ = +0.00 MJ/lap · net deploy/bank — zero-sum shapes stay store-neutral and only reshape pace; drawn from the 4.0 MJ store (30% floor)</div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:0.72em;color:#99a">
+                    <label for="ov-ers-batt" style="margin:0;flex-shrink:0;color:#9aa">Battery Now (MJ)</label>
+                    <input type="number" id="ov-ers-batt" min="0" max="4" step="0.1" value="" placeholder="blank = ~62% band"
+                           style="width:84px;background:#1b1b22;border:1px solid #ffffff26;border-radius:6px;color:#eee;padding:4px 8px;font-family:'Share Tech Mono',monospace"
+                           title="Chaser battery right now, in MJ of the 4.0 MJ store — blank uses the mid-race working band (~62%). Deploy draws it down to the 30% floor; bank tops out at a full store.">
+                    <span style="color:#667">MJ of 4.0 — blank = auto</span>
+                </div>
+            </div>
+            <div class="ht-steps">
+                <span class="ht-step"><b>①</b> Pick the battle — a round on the <b>Calendar</b> tab preloads the pair + race, or choose them above</span>
+                <span class="ht-step"><b>②</b> Set the live state: each car's tyre, the gap, the lap, the total race length, and how hard the chaser should push</span>
+                <span class="ht-step"><b>③</b> Make the call</span>
+            </div>
+            <div class="ht-gaprow">
+                <div class="field" style="margin:0">
+                    <label>Gap delta — <span id="ov-gap-val" style="color:#ffd700">0.8s</span></label>
+                    <div class="call-gap-row">
+                        <input type="range" id="ov-gap" min="0.1" max="20" step="0.1" value="0.8"
+                               oninput="setGapVal(this.value)">
+                        <span class="call-gap-val" id="ov-gap-side">0.8s</span>
+                    </div>
+                    <div class="ht-presets">
+                        <button type="button" class="ht-preset" onclick="setGapVal(0.5)">0.5s</button>
+                        <button type="button" class="ht-preset" onclick="setGapVal(1.0)">1.0s</button>
+                        <button type="button" class="ht-preset" onclick="setGapVal(1.5)">1.5s</button>
+                        <button type="button" class="ht-preset" onclick="setGapVal(3.0)">3.0s</button>
+                        <button type="button" class="ht-preset" onclick="setGapVal(5.0)">5.0s</button>
+                    </div>
+                </div>
+                <div class="two-col ht-cols" style="gap:12px">
+                    <div class="field" style="margin:0">
+                        <label>Current lap</label>
+                        <input type="number" id="ov-lap" min="1" value="1">
+                    </div>
+                    <div class="field" style="margin:0">
+                        <label>Race length (laps)</label>
+                        <input type="number" id="ov-racelaps" min="1" max="130" value="57" title="Total laps of this race — the projection horizon to the flag">
+                    </div>
+                </div>
+            </div>
+            <button class="action-btn" id="call-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px" onclick="runRaceCall()">▲ WHAT'S THE CALL?</button>
+            <details class="ht-hint">
+                <summary>ⓘ What the call does</summary>
+                <p>Projects THIS race forward from the current lap — no replay of a finished race. Each driver's career (aggregate) pace model predicts their lap time on the current circuit / tyre context; tyre ages tick up one lap at a time and the gap moves by the modeled pace edge. Once the chaser is within ~1.2&nbsp;s the per-lap overtake probability is accumulated, and the call is the lap the cumulative chance crosses 50%. The <b>chaser ERS sector sliders</b> (S1/S2/S3, exactly the Energy Sandbox's vocabulary) shape the chaser's deployment per lap: each sector's delta is worth that sector's measured s/MJ, so a zero-sum shape can buy time by reallocating to the fast sectors without touching the battery; a positive net draws the 4.0&nbsp;MJ store down to the 30% floor (faster), a negative net banks it (slower). Battery Now defaults to the mid-race working band (~62%) when left blank. The leader is assumed Balanced — a wall only controls its own car. No pit-stop or Safety-Car model — tyres run to the flag, so re-run after stops for the live picture.</p>
+            </details>
+            <div class="err-box" id="ov-err"></div>
+            <div id="ov-call"><div class="chart-note">Set the live battle state and make the call — the deck projects the rest of this race from the two cars' career pace models. A round on the Calendar tab preloads the pair + circuit + season.</div></div>
         </div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#777;margin-bottom:12px"><b>3 steps:</b> ① click the round on the <b>Calendar</b> tab (preloads the pair + race) or pick them above · ② set how far the chaser is behind right now · ③ make the call. It replays the race from the current lap under <b>Balanced / Push / Lift &amp; Coast</b> and answers with <b>one call plus the alternatives</b> — the end battery is always checked against the floor so the car is never left defenseless at the flag.</div>
-        <button class="action-btn" id="call-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px" onclick="runRaceCall()">▲ WHAT'S THE CALL?</button>
-        <div class="err-box" id="ov-err"></div>
-        <div id="ov-call"><div class="chart-note">Run the call to get the strategy verdict — or click a round on the Calendar tab to preload the two cars and race.</div></div>
     </div>
 
-    <div class="panel red" style="margin-top:24px">
-        <div class="panel-title">Full-Race Breakdown — advanced <span style="opacity:0.45;font-weight:400">(speed-trace replay · sector Overtake % · ERS duels · calibration)</span></div>
-        <div class="two-col" style="gap:12px;margin-bottom:0">
-            <div class="field">
-                <label>Leader session ID</label>
-                <input type="number" id="ovr-leader" min="1" placeholder="resolved from drivers above">
+    <!-- MODULE 02 · FULL-RACE REPLAY (advanced; folded by default) -->
+    <div class="ht-mod" id="ht-fullrace">
+        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-fullrace',this)">
+            <span class="ht-idx">02</span>
+            <span class="ht-titles">
+                <span class="ht-title">Full-Race Replay <span class="ht-adv">ADVANCED</span></span>
+                <span class="ht-sub">Speed-trace replay to the flag · sector Overtake % · ERS duels · calibration</span>
+            </span>
+            <span class="ht-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="ht-body">
+            <div class="two-col ht-cols">
+                <div class="field">
+                    <label>Leader session ID</label>
+                    <input type="number" id="ovr-leader" min="1" placeholder="resolved from drivers above">
+                </div>
+                <div class="field">
+                    <label>Chaser session ID</label>
+                    <input type="number" id="ovr-chaser" min="1" placeholder="resolved from drivers above">
+                </div>
+                <div class="field">
+                    <label>Start lap</label>
+                    <input type="number" id="ovr-start" min="1" value="1">
+                </div>
+                <div class="field">
+                    <label>Gap delta (s)</label>
+                    <input type="number" id="ovr-gap" min="0.1" step="0.1" value="1.5">
+                </div>
+                <div class="field">
+                    <label>End lap (blank = flag)</label>
+                    <input type="number" id="ovr-end" min="1" placeholder="flag">
+                </div>
+                <div class="field">
+                    <label>Max laps</label>
+                    <input type="number" id="ovr-maxlaps" min="1" max="120" value="80">
+                </div>
             </div>
-            <div class="field">
-                <label>Chaser session ID</label>
-                <input type="number" id="ovr-chaser" min="1" placeholder="resolved from drivers above">
+            <div id="ovr-context" class="ht-resolved"></div>
+            <details class="ht-hint">
+                <summary>ⓘ How the replay works</summary>
+                <p>Uses the leader / chaser / track / year picks in RACE CALL above — resolves the two drivers' real race sessions for that track &amp; season, then replays every shared lap to the flag. Tyre, fuel and ERS (race_state) features are read from the database, so energy_diff is real whenever the energy simulator has run for those sessions. Overtake % is split into S1/S2/S3 by where the chaser is gaining and where the braking evidence sits. Runs again automatically when you re-run the energy simulator for one of these sessions.</p>
+            </details>
+            <div style="margin-bottom:8px">
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin-bottom:4px">Symmetric ERS sweep — re-scores each lap's energy_diff with that mode's projected trace on BOTH cars (only the ERS feature changes, so each row isolates that deployment choice):</div>
+                <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-balanced" checked> Balanced</label>
+                <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-push" checked> Push</label>
+                <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-liftcoast"> Lift &amp; Coast</label>
             </div>
-            <div class="field">
-                <label>Start lap</label>
-                <input type="number" id="ovr-start" min="1" value="1">
+            <div style="margin-bottom:12px;border-top:1px solid #ffffff14;padding-top:8px">
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin-bottom:4px">Asymmetric duel — leader on one ERS spec, chaser on another (pick different specs; adds a <b style="color:#ff6b6b">LEADER &gt; CHASER</b> row/ring answering when the overtake happens when one attacks while the other defends):</div>
+                <span style="font-size:0.72em;color:#eee;margin-right:10px">Leader <select id="ovr-lmode" style="font-size:0.95em"><option value="balanced">Balanced</option><option value="push">Push</option><option value="liftcoast">Lift &amp; Coast</option><option value="stored">As stored (real trace)</option></select></span>
+                <span style="font-size:0.72em;color:#eee">Chaser <select id="ovr-cmode" style="font-size:0.95em"><option value="balanced">Balanced</option><option value="push">Push</option><option value="liftcoast">Lift &amp; Coast</option><option value="stored">As stored (real trace)</option></select></span>
             </div>
-            <div class="field">
-                <label>Gap delta (s)</label>
-                <input type="number" id="ovr-gap" min="0.1" step="0.1" value="1.5">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+                <button class="action-btn" style="width:auto;margin:0" onclick="runFullRaceSim()">SIMULATE FULL RACE</button>
+                <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="resolveRaceSessions()">RESOLVE SESSIONS</button>
+                <button class="action-btn" id="ovr-export-csv" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="exportRaceCsv()" disabled>EXPORT CSV</button>
+                <button class="action-btn" id="ovr-export-json" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="exportRaceJson()" disabled>EXPORT JSON</button>
+                <button class="action-btn" id="ovr-cal-scan" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="scanSeasonCalibration()">SCAN SEASON CALIBRATION</button>
             </div>
-            <div class="field">
-                <label>End lap (blank = flag)</label>
-                <input type="number" id="ovr-end" min="1" placeholder="flag">
-            </div>
-            <div class="field">
-                <label>Max laps</label>
-                <input type="number" id="ovr-maxlaps" min="1" max="120" value="80">
-            </div>
+            <div class="err-box" id="ovr-err"></div>
+            <div id="ovr-cal-out"></div>
+            <div id="ovr-out"></div>
         </div>
-        <div id="ovr-context" style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#777;margin-bottom:12px">Uses the leader / chaser / track / year picks above — resolves the two drivers' real race sessions for that track &amp; season, then replays every shared lap to the flag. Tyre, fuel and ERS (race_state) features are read from the database, so energy_diff is real whenever the energy simulator has run for those sessions. Overtake % is split into S1/S2/S3 by where the chaser is gaining and where the braking evidence sits. Runs again automatically when you re-run the energy simulator for one of these sessions.</div>
-        <div style="margin-bottom:8px">
-            <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin-bottom:4px">Symmetric ERS sweep — re-scores each lap's energy_diff with that mode's projected trace on BOTH cars (only the ERS feature changes, so each row isolates that deployment choice):</div>
-            <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-balanced" checked> Balanced</label>
-            <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-push" checked> Push</label>
-            <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-liftcoast"> Lift &amp; Coast</label>
-        </div>
-        <div style="margin-bottom:12px;border-top:1px solid #ffffff14;padding-top:8px">
-            <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin-bottom:4px">Asymmetric duel — leader on one ERS spec, chaser on another (pick different specs; adds a <b style="color:#ff6b6b">LEADER &gt; CHASER</b> row/ring answering when the overtake happens when one attacks while the other defends):</div>
-            <span style="font-size:0.72em;color:#eee;margin-right:10px">Leader <select id="ovr-lmode" style="font-size:0.95em"><option value="balanced">Balanced</option><option value="push">Push</option><option value="liftcoast">Lift &amp; Coast</option><option value="stored">As stored (real trace)</option></select></span>
-            <span style="font-size:0.72em;color:#eee">Chaser <select id="ovr-cmode" style="font-size:0.95em"><option value="balanced">Balanced</option><option value="push">Push</option><option value="liftcoast">Lift &amp; Coast</option><option value="stored">As stored (real trace)</option></select></span>
-        </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-            <button class="action-btn" onclick="runFullRaceSim()">SIMULATE FULL RACE</button>
-            <button class="action-btn" style="background:#1c1c24;color:#ccc" onclick="resolveRaceSessions()">RESOLVE SESSIONS</button>
-            <button class="action-btn" id="ovr-export-csv" style="background:#1c1c24;color:#ccc" onclick="exportRaceCsv()" disabled>EXPORT CSV</button>
-            <button class="action-btn" id="ovr-export-json" style="background:#1c1c24;color:#ccc" onclick="exportRaceJson()" disabled>EXPORT JSON</button>
-            <button class="action-btn" id="ovr-cal-scan" style="background:#1c1c24;color:#ccc" onclick="scanSeasonCalibration()">SCAN SEASON CALIBRATION</button>
-        </div>
-        <div class="err-box" id="ovr-err"></div>
-        <div id="ovr-cal-out"></div>
-        <div id="ovr-out"></div>
     </div>
 
-    <div class="panel red" style="margin-top:24px">
-        <div class="panel-title">Per-Lap &amp; Battle Tuner <span style="opacity:0.45;font-weight:400">(P0 model · advanced · runs the RACE CALL scenario above)</span></div>
-        <div class="two-col" style="gap:12px;margin-bottom:0">
-            <div class="field">
-                <label>Leader tyre</label>
-                <select id="ov-ltyre"></select>
+    <!-- MODULE 03 · PER-LAP & BATTLE TUNER (advanced; folded by default) -->
+    <div class="ht-mod" id="ht-tuner">
+        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-tuner',this)">
+            <span class="ht-idx">03</span>
+            <span class="ht-titles">
+                <span class="ht-title">Per-Lap &amp; Battle Tuner <span class="ht-adv">ADVANCED</span></span>
+                <span class="ht-sub">P0 model probe — what-if tyre / fuel / energy assumptions behind the call</span>
+            </span>
+            <span class="ht-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="ht-body">
+            <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#9aa;margin:0 0 6px">Scenario + tyre state come from RACE CALL above — this tunes the WHAT-IF deltas on top:</div>
+            <div class="two-col ht-cols">
+                <div class="field">
+                    <label>Fuel diff (kg) — chaser − leader fuel at lap start</label>
+                    <input type="number" id="ov-fueldiff" min="-20" max="20" step="0.5" value="-3.0">
+                </div>
+                <div class="field">
+                    <label>Energy diff (MJ) — chaser − leader battery entering lap</label>
+                    <input type="number" id="ov-energydiff" min="-2" max="2" step="0.1" value="0.0">
+                </div>
+                <div class="field">
+                    <label>Battle laps to sim</label>
+                    <input type="number" id="ov-simlaps" min="1" max="60" value="12">
+                </div>
             </div>
-            <div class="field">
-                <label>Chaser tyre</label>
-                <select id="ov-ctyre"></select>
-            </div>
-            <div class="field">
-                <label>Leader tyre age</label>
-                <input type="number" id="ov-lage" min="0" value="10">
-            </div>
-            <div class="field">
-                <label>Chaser tyre age</label>
-                <input type="number" id="ov-cage" min="0" value="4">
-            </div>
-            <div class="field">
-                <label>Fuel diff (kg) — chaser − leader fuel at lap start</label>
-                <input type="number" id="ov-fueldiff" min="-20" max="20" step="0.5" value="-3.0">
-            </div>
-            <div class="field">
-                <label>Energy diff (MJ) — chaser − leader battery entering lap</label>
-                <input type="number" id="ov-energydiff" min="-2" max="2" step="0.1" value="0.0">
-            </div>
-            <div class="field">
-                <label>Battle laps to sim</label>
-                <input type="number" id="ov-simlaps" min="1" max="60" value="12">
+            <details class="ht-hint">
+                <summary>ⓘ What this tunes</summary>
+                <p>One-lap overtake probability and a short battle roll-forward for the leader/chaser scenario set in RACE CALL above (drivers, track, tyre state, current lap and gap). Use these fields to probe what-if tyre / fuel / energy assumptions — the same P0 features drive the full-race replay, so this is the place to sanity-check the model, not the place to make the race-weekend call.</p>
+            </details>
+            <button class="action-btn" onclick="runOvertakeSim()">RUN PER-LAP / BATTLE TUNE</button>
+            <div id="ov-out"></div>
+        </div>
+    </div>
+
+    <!-- MODULE 04 · ENERGY LAB (synthetic 2026 ERS; folded by default) -->
+    <div class="ht-mod" id="ht-energylab">
+        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-energylab',this)">
+            <span class="ht-idx">04</span>
+            <span class="ht-titles">
+                <span class="ht-title">Energy Lab <span class="ht-adv">SYNTHETIC ERS</span></span>
+                <span class="ht-sub">Compare deployment modes, then fine-tune one lap sector by sector</span>
+            </span>
+            <span class="ht-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="ht-body">
+            <div class="ht-labgrid">
+                <div class="ht-subcard">
+                    <div class="ht-subcard-t">A · Compare Modes <span class="ht-tag">3 deployment envelopes · laps remaining in the session</span></div>
+                    <div class="two-col" style="gap:10px;margin-bottom:0">
+                        <div class="field">
+                            <label>Session ID</label>
+                            <input type="number" id="e-session" min="1" value="78">
+                        </div>
+                        <div class="field">
+                            <label>Current Lap</label>
+                            <input type="number" id="e-lap" min="1" value="10">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Battery Now (MJ) — blank = auto</label>
+                        <input type="number" id="e-batt" min="0" max="4" step="0.25" placeholder="auto from trace (ES usable = 4 MJ)">
+                    </div>
+                    <details class="ht-hint" style="margin:2px 0 10px">
+                        <summary>ⓘ What it compares</summary>
+                        <p>Compares Push / Balanced / Lift&nbsp;&amp;&nbsp;Coast deployment over the laps remaining in that session. Battery "now" defaults to the stored energy trace at the chosen lap (full store if none).</p>
+                    </details>
+                    <button class="action-btn" onclick="runEnergyCompare()">ANALYZE ENERGY MODES</button>
+                    <div class="err-box" id="energy-err"></div>
+                    <div id="energy-whatif-out"></div>
+                </div>
+                <div class="ht-subcard">
+                    <div class="ht-subcard-t">B · Sector Sandbox <span class="ht-tag">per-sector deploy deltas within one lap</span></div>
+                    <div class="two-col" style="gap:10px;margin-bottom:0">
+                        <div class="field">
+                            <label>Session ID</label>
+                            <input type="number" id="sb-session" min="1" value="78">
+                        </div>
+                        <div class="field">
+                            <label>Lap</label>
+                            <input type="number" id="sb-lap" min="1" value="10">
+                        </div>
+                    </div>
+                    <div class="two-col" style="gap:10px;margin-bottom:0">
+                        <div class="field">
+                            <label>Baseline Mode</label>
+                            <select id="sb-mode">
+                                <option value="balanced" selected>Balanced</option>
+                                <option value="push">Push</option>
+                                <option value="liftcoast">Lift &amp; Coast</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Battery Now (MJ) — blank = auto</label>
+                            <input type="number" id="sb-batt" min="0" max="4" step="0.25" placeholder="auto from trace">
+                        </div>
+                    </div>
+                    <details class="ht-hint" style="margin:2px 0 10px">
+                        <summary>ⓘ What the sliders do</summary>
+                        <p>Per-sector deploy-delta sliders. The mode sets the lap's deploy envelope; deltas <b>reallocate</b> it between S1/S2/S3 (zero-sum). The 2026 PU has <b>no fixed per-lap deploy quota</b> — deployment is store-limited bursts (ceiling 8.5 MJ/lap). Watch for battery-floor and FIA-cap warnings.</p>
+                    </details>
+                    <div class="sb-sliders">
+                        <div class="sb-row"><label>S1</label><input type="range" id="sb-d1" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v1">+0.00</span></div>
+                        <div class="sb-row"><label>S2</label><input type="range" id="sb-d2" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v2">+0.00</span></div>
+                        <div class="sb-row"><label>S3</label><input type="range" id="sb-d3" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v3">+0.00</span></div>
+                    </div>
+                    <div class="sb-sum" id="sb-sum">&Sigma; &Delta; = +0.00 MJ &middot; lap budget fixed &mdash; deltas reallocate within it (live recalc)</div>
+                    <button class="action-btn" onclick="runSandbox()">SIMULATE SECTOR SHIFT</button>
+                    <div class="err-box" id="sb-err"></div>
+                    <div id="sb-out"></div>
+                </div>
             </div>
         </div>
-        <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;letter-spacing:1px;color:#777;margin-bottom:12px">One-lap overtake probability and a short battle roll-forward for the leader/chaser scenario set in <b>RACE CALL</b> above (the lap and the gap behind now are taken from the call inputs). Use these sliders to probe what-if tyre / fuel / energy assumptions — the same P0 features drive the full-race replay, so this is the place to sanity-check the model, not the place to make the race-weekend call.</div>
-        <button class="action-btn" onclick="runOvertakeSim()">RUN PER-LAP / BATTLE TUNE</button>
-        <div id="ov-out"></div>
     </div>
 </div>
 
@@ -1338,6 +1497,14 @@ function switchTab(name, btn) {
     document.getElementById('tab-' + name).classList.add('active');
     btn.classList.add('active');
     if (name === 'drivers') loadDriverOptions();
+}
+
+// Hammer Time modular deck: open/close a module by id (all controls stay in the DOM).
+function htToggle(modId, btn) {
+    const mod = document.getElementById(modId);
+    if (!mod) return;
+    const open = mod.classList.toggle('open');
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 function fmtTime(s) {
@@ -3168,9 +3335,76 @@ async function scanSeasonCalibration() {
     if (btn) { btn.disabled = false; btn.textContent = 'SCAN SEASON CALIBRATION'; }
 }
 
-// ── RACE CALL (strategy co-pilot): scenario in → definitive call + alternatives ──
-let lastCallRace = null;
-const CALL_BATT_FLOOR_PCT = 5; // deck: never leave the car defenseless at the flag (energy paradox / FIA floor)
+// ── RACE CALL (live co-pilot): current tyre state + gap in → forward projection + the call ──
+let lastLiveCompare = null;
+const LIVE_WINDOW_S = 1.2;   // deck: P0 overtake signal only lives inside ~DRS range
+const LIVE_PASS_CUM = 0.8;   // deck: cumulative P(overtake) treated as the projected pass (raised from 0.5 after the race-call backtest over-calling passes that never happened)
+// Conversion phrasing is grounded in backtest_race_calls.py (HAM/VER 2021
+// sample): a projected pass converted ~12% of the time and >=80%-confidence
+// calls ~7%.  Re-run the harness over the full sweep and update these.
+const BT_PASS_CONVERT_RATE = 0.12;
+const BT_HIGH_CONF_CONVERT_RATE = 0.07;
+// The three compared ERS settings, as per-sector deploy-delta vectors (MJ) —
+// the same vocabulary as the Energy Sandbox.  Balanced is the flat neutral
+// shape; Push / Lift & Coast apply the calibrated spread to all three
+// sectors (net ±0.15 MJ/lap).  The sector sliders add a custom 4th setting.
+const ERS_SECTOR_SPREAD = 0.05;
+const PRESET_SCENARIOS = [
+    { key: 'lcoast', label: 'Lift & Coast', color: '#4fc3f7',
+      deltas: [-ERS_SECTOR_SPREAD, -ERS_SECTOR_SPREAD, -ERS_SECTOR_SPREAD] },
+    { key: 'balanced', label: 'Balanced', color: '#ffd700',
+      deltas: [0, 0, 0] },
+    { key: 'push', label: 'Push', color: '#ff6b6b',
+      deltas: [ERS_SECTOR_SPREAD, ERS_SECTOR_SPREAD, ERS_SECTOR_SPREAD] },
+];
+
+function scenNet(sc) {
+    return (sc.deltas || []).reduce(function (a, b) { return a + b; }, 0);
+}
+function scenIsBalanced(sc) { return Math.abs(scenNet(sc)) < 1e-9; }
+function socEndOf(r) {
+    const s = r.summary || {};
+    return s.chaser_soc_end_pct != null ? s.chaser_soc_end_pct + '%' : '—';
+}
+
+function setGapVal(v) {
+    const g = document.getElementById('ov-gap');
+    if (g) g.value = v;
+    const l = document.getElementById('ov-gap-val');
+    if (l) l.textContent = v + 's';
+    const side = document.getElementById('ov-gap-side');
+    if (side) side.textContent = v + 's';
+}
+
+function ovSectorDeltas() {
+    return ['ov-d1', 'ov-d2', 'ov-d3'].map(function (id) {
+        const el = document.getElementById(id);
+        return el ? (parseFloat(el.value) || 0) : 0;
+    });
+}
+function ovSectorInput() {
+    const ds = ovSectorDeltas();
+    ['ov-v1', 'ov-v2', 'ov-v3'].forEach(function (id, i) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = (ds[i] >= 0 ? '+' : '') + ds[i].toFixed(2);
+    });
+    const sum = ds.reduce(function (a, b) { return a + b; }, 0);
+    const el = document.getElementById('ov-sum');
+    if (el) {
+        let net = 'pure reallocation — store-neutral, pace shape only';
+        if (sum > 0.005) net = "net deploy from the chaser's 4.0 MJ store (30% floor)";
+        else if (sum < -0.005) net = "net bank to the chaser's 4.0 MJ store (full = stop lifting)";
+        el.textContent = 'Σ Δ = ' + (sum >= 0 ? '+' : '') + sum.toFixed(2) +
+            ' MJ/lap · ' + net + " — each sector's delta worth its own s/MJ";
+    }
+}
+function setOvErsShape(d1, d2, d3) {
+    [['ov-d1', d1], ['ov-d2', d2], ['ov-d3', d3]].forEach(function (pair) {
+        const el = document.getElementById(pair[0]);
+        if (el) el.value = pair[1];
+    });
+    ovSectorInput();
+}
 
 async function runRaceCall() {
     const err = document.getElementById('ov-err');
@@ -3187,29 +3421,60 @@ async function runRaceCall() {
         }
         return;
     }
-    if (btn) { btn.disabled = true; btn.textContent = 'MODELLING THE CALL…'; }
-    if (out) out.innerHTML = '<div class="chart-note">Resolving the pair\'s real race sessions, then replaying every lap under Balanced / Push / Lift &amp; Coast…</div>';
-    try {
-        const resolved = await resolveRaceSessions();
-        if (!resolved) return;
-        const body = {
-            full_race: true,
-            leader_session_id: parseInt(document.getElementById('ovr-leader').value, 10) || 0,
-            chaser_session_id: parseInt(document.getElementById('ovr-chaser').value, 10) || 0,
-            start_lap: parseInt(document.getElementById('ov-lap').value, 10) || 1,
-            gap_before_s: parseFloat(document.getElementById('ov-gap').value) || 0.8,
-            max_laps: parseInt(document.getElementById('ovr-maxlaps').value, 10) || 80,
-            modes: ['balanced', 'push', 'liftcoast'],
-        };
-        const res = await fetch('/api/overtake/sim', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+    const battMjRaw = document.getElementById('ov-ers-batt').value;
+    const battPct = battMjRaw === ''
+        ? null
+        : Math.max(30, Math.min(100, 100 * parseFloat(battMjRaw) / 4.0));
+    const base = {
+        leader_code: leader,
+        chaser_code: chaser,
+        track_name: track,
+        year: parseInt(document.getElementById('ov-year').value, 10) || null,
+        start_lap: parseInt(document.getElementById('ov-lap').value, 10) || 1,
+        race_length: parseInt(document.getElementById('ov-racelaps').value, 10) || 57,
+        gap_before_s: parseFloat(document.getElementById('ov-gap').value) || 0.8,
+        leader_tyre_compound: document.getElementById('ov-ltyre').value,
+        chaser_tyre_compound: document.getElementById('ov-ctyre').value,
+        leader_tyre_age: parseInt(document.getElementById('ov-lage').value, 10) || 0,
+        chaser_tyre_age: parseInt(document.getElementById('ov-cage').value, 10) || 0,
+    };
+    if (battPct != null) base.chaser_battery_pct = battPct;
+    // The compared settings: the three preset vectors (Balanced / Push /
+    // Lift & Coast) plus the slider's current sector shape when it differs
+    // from every preset.
+    const customDeltas = ovSectorDeltas();
+    const scenarios = PRESET_SCENARIOS.map(p => ({
+        key: p.key, label: p.label, color: p.color, deltas: p.deltas.slice(),
+        custom: false
+    }));
+    const dup = PRESET_SCENARIOS.find(p =>
+        p.deltas.every((d, i) => Math.abs(d - customDeltas[i]) < 1e-9));
+    if (!dup) {
+        const net = customDeltas.reduce((a, b) => a + b, 0);
+        scenarios.push({
+            key: 'custom', custom: true,
+            label: Math.abs(net) < 0.005 ? 'Balanced'
+                 : (net > 0 ? 'Push' : 'Lift & Coast'),
+            color: net >= 0 ? '#ff6b6b' : '#4fc3f7',
+            deltas: customDeltas
         });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        lastCallRace = data.full_race;
-        renderFullRace(lastCallRace);   // full breakdown (charts/tables/P4) renders below
-        renderRaceCallCards(lastCallRace);
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'MODELLING ' + scenarios.length + ' SETTINGS…'; }
+    if (out) out.innerHTML =
+        `<div class="chart-note">Running the race forward from L${base.start_lap} of ${base.race_length} under <b>Lift &amp; Coast / Balanced / Push</b>${scenarios.some(s => s.custom) ? ' + your sector shape' : ''} — leader assumed Balanced, tyre ages ticking up, no pit-stop / SC model…</div>`;
+    try {
+        const results = await Promise.all(scenarios.map(async sc => {
+            const res = await fetch('/api/overtake/live', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(Object.assign({}, base, { chaser_ers_deltas: sc.deltas }))
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            return { scenario: sc, live: data.live };
+        }));
+        lastLiveCompare = results;
+        renderLiveCompare(results);
     } catch (e) {
         if (err) { err.textContent = 'Race call error: ' + e.message; err.style.display = 'block'; }
     } finally {
@@ -3217,102 +3482,199 @@ async function runRaceCall() {
     }
 }
 
-function callScenarios(r) {
-    const rows = [{
-        key: 'stored', label: 'AS RACED', color: OVR_MODE_COLORS.stored,
-        pass_lap: r.pass_lap, pass_sector: r.pass_sector, final_gap_s: r.final_gap_s,
-        battery_pct: null, clip: 0, mean_prob: null, max_prob: null,
-    }];
-    (r.mode_compare || []).forEach(x => {
-        let battery = null;
-        if (x.final_battery_pct != null) battery = x.final_battery_pct;
-        else if (x.leader_final_battery_pct != null) battery = Math.min(x.leader_final_battery_pct, x.chaser_final_battery_pct);
-        rows.push({
-            key: x.mode, label: srcLabel(x.mode), color: srcColor(x.mode),
-            pass_lap: x.pass_lap, pass_sector: x.pass_sector, final_gap_s: x.final_gap_s,
-            battery_pct: battery, clip: x.energy_clipped_laps || 0,
-            mean_prob: x.mean_probability, max_prob: x.max_probability,
-        });
+function livePct(p) { return Math.round(100 * Math.min(1, Math.max(0, p || 0))); }
+
+// Pick THE CALL from the compared settings: the lightest ERS setting that
+// still projects a clean pass; else best window; else conserve-to-the-flag.
+// Net-zero shapes (Balanced, or a store-neutral reallocation) anchor first.
+function chooseCall(scenarios) {
+    const byVerdict = (v) => scenarios.filter(x => x.live.call.verdict === v);
+    const passers = byVerdict('attack').sort((a, b) => {
+        const aw = scenIsBalanced(a.scenario) ? -Infinity : scenNet(a.scenario);
+        const bw = scenIsBalanced(b.scenario) ? -Infinity : scenNet(b.scenario);
+        return aw - bw;
     });
-    return rows;
+    if (passers.length) return { kind: 'pass', run: passers[0], passers };
+    const attempts = byVerdict('attempt').sort(
+        (a, b) => (b.live.summary.best_lap_probability || 0)
+                - (a.live.summary.best_lap_probability || 0));
+    if (attempts.length) return { kind: 'attempt', run: attempts[0], attempts };
+    const balanced = scenarios.find(s => scenIsBalanced(s.scenario)) || scenarios[0];
+    return { kind: 'none', run: balanced };
 }
 
-function callClass(rw) {
-    if (rw.pass_lap && rw.battery_pct != null && rw.battery_pct < CALL_BATT_FLOOR_PCT) return 'risky';
-    return rw.pass_lap ? 'pass' : 'nopass';
-}
-
-function renderRaceCallCards(r, forcedKey) {
+function renderLiveCompare(scenarios) {
     const out = document.getElementById('ov-call');
     if (!out) return;
+    const picked = chooseCall(scenarios);
+    const pick = picked.run;
+    const sc = pick.scenario;
+    const r = pick.live;
     const m = r.meta || {};
-    const e = r.energy || { real_laps: 0, imputed_laps: 0 };
-    const rows = callScenarios(r);
-    const strategies = rows.filter(rw => rw.key !== 'stored');
-    let best = null;
-    if (forcedKey) best = rows.find(rw => rw.key === forcedKey) || null;
-    if (!best) {
-        // Recommend the strategy that still makes the pass with the most
-        // battery left; if nobody passes cleanly, recommend the one that
-        // protects the most energy for the flag (the deck's paradox: fast
-        // now = limited later, so never trade the finish for the pass).
-        const passes = strategies.filter(rw => callClass(rw) === 'pass')
-            .sort((a, b) => (b.battery_pct || 0) - (a.battery_pct || 0) || (a.pass_lap || 999) - (b.pass_lap || 999));
-        if (passes.length) {
-            best = passes[0];
+    const c = r.call || {};
+    const s = r.summary || {};
+    const lt = (m.tyres || {}).leader || {};
+    const ct = (m.tyres || {}).chaser || {};
+    const ersMeta = m.ers || {};
+    const battIn = document.getElementById('ov-ers-batt');
+    const battOverridePct = battIn && battIn.value !== ''
+        ? Math.round(100 * Math.max(0, Math.min(4, parseFloat(battIn.value) || 0)) / 4.0)
+        : null;
+    const battStart = battOverridePct != null ? battOverridePct + '%' :
+        (ersMeta.chaser_battery_start_pct != null
+            ? ersMeta.chaser_battery_start_pct + '%' : '~62%');
+    const net = s.avg_pace_gap_s || 0;
+    const netTxt = (net >= 0 ? '+' : '') + net.toFixed(3) + 's/lap ' +
+        (net >= 0 ? 'toward' : 'away');
+
+    const cards = scenarios.map(x => {
+        const rr = x.live;
+        const cc = rr.call || {};
+        const ss = rr.summary || {};
+        let resTxt, cls = '';
+        if (cc.verdict === 'attack') {
+            resTxt = `<span style="color:#ff6b6b;font-weight:700">PASS L${cc.pass_lap}</span>`;
+        } else if (cc.verdict === 'attempt') {
+            cls = ' risky';
+            resTxt = `attackable ~L${cc.window_open_lap} · no pass`;
         } else {
-            const safe = strategies.filter(rw => callClass(rw) !== 'risky')
-                .sort((a, b) => (b.battery_pct || 0) - (a.battery_pct || 0));
-            best = safe[0] || strategies[0] || null;
+            resTxt = `no window · final gap ${ss.projected_final_gap_s}s`;
         }
-    }
-    const battTxt = p => (p == null ? '' : ' · ends <b>' + p.toFixed(1) + '%</b> battery');
-    const verdict =
-        best && best.pass_lap
-            ? `<div class="pass-verdict"><span>▲ Overtake on lap</span><span class="pass-lap-big">${best.pass_lap}</span>` +
-              `<span>— run <b style="color:${best.color}">${best.label}</b>${best.pass_sector ? ' · most likely S' + best.pass_sector : ''}</span>` +
-              (best.battery_pct != null ? `<span class="pass-extra">${best.battery_pct.toFixed(1)}% battery at the flag — above the ${CALL_BATT_FLOOR_PCT}% floor</span>` : '') +
-              `</div>`
-            : `<div class="pass-verdict no-pass">NO CLEAN OVERTAKE — ${best ? `run <b style="color:${best.color}">${best.label}</b> and manage to the flag` + battTxt(best.battery_pct) : 'hold position'}</div>`;
-    const riskyNote = (best && callClass(best) === 'risky')
-        ? `<div class="chart-note" style="color:#ffb300;margin-top:6px">⚠ ${best.label} makes the pass but ends below the ${CALL_BATT_FLOOR_PCT}% battery floor — the car is left defenseless in the final laps. Prefer a higher-battery alternative above.</div>`
-        : '';
-    const cards = rows.map(rw => {
-        const isBest = rw === best;
-        const result = rw.pass_lap
-            ? `<span style="color:#ff6b6b;font-weight:700">PASS L${rw.pass_lap}</span>${rw.pass_sector ? ' · S' + rw.pass_sector : ''}`
-            : `no pass · final gap ${rw.final_gap_s}s`;
-        const sub = rw.battery_pct != null
-            ? `ends ${rw.battery_pct.toFixed(1)}% battery`
-            : (rw.key === 'stored' ? 'battery as raced (real trace)' : 'battery n/a');
-        const clip = rw.clip
-            ? `<div class="cc-note" style="color:#ffb300" title="energy_diff beyond the models' trained range was capped on these laps">⚠ ΔE capped ${rw.clip} lap(s)</div>`
-            : '';
-        return `<div class="call-card${isBest ? ' best' : ''}${callClass(rw) === 'risky' ? ' risky' : ''}" onclick="selectCallCard('${rw.key}')">` +
-            (isBest ? '<span class="call-tag">THE CALL</span>' : '') +
-            `<div class="cc-mode" style="color:${rw.color}">${rw.label}</div>` +
-            `<div class="cc-result">${result}${battTxt(rw.battery_pct)}</div>` +
-            `<div class="cc-note">${sub}${rw.mean_prob != null ? ' · mean P ' + rw.mean_prob.toFixed(3) : ''}${rw.max_prob != null ? ' · max P ' + rw.max_prob.toFixed(3) : ''}</div>` +
-            (callClass(rw) === 'risky' ? `<div class="cc-note" style="color:#ffb300">⚠ below floor — defenseless at the flag</div>` : '') +
-            clip +
+        const hasSoc = ss.chaser_soc_end_pct != null;
+        const battTxt = hasSoc
+            ? `battery ${battStart} → ${socEndOf(rr)}`
+            : 'battery n/a (net-zero shape)';
+        const isRec = x === pick;
+        return `<div class="call-card${isRec ? ' best' : ''}${cls}">` +
+            (isRec ? '<span class="call-tag">THE CALL</span>' :
+                (x.scenario.custom ? '<span class="call-tag" style="background:#2a2a35">YOUR SETTING</span>' : '')) +
+            `<div class="cc-mode" style="color:${x.scenario.color}">${x.scenario.label}</div>` +
+            `<div class="cc-result">${resTxt}</div>` +
+            `<div class="cc-note">${battTxt} · cum P ${livePct(cc.cumulative_probability)}%</div>` +
+            (ss.ers_energy_limited_laps
+                ? `<div class="cc-note" style="color:#ffb300">⚠ hit the 30% floor ${ss.ers_energy_limited_laps} lap(s)</div>`
+                : '') +
             `</div>`;
     }).join('');
-    const g0 = (r.laps && r.laps[0]) ? r.laps[0].gap_before_s + 's' : (m.gap_before_s != null ? m.gap_before_s + 's' : '?');
-    const energyNote = (e.real_laps + e.imputed_laps) > 0
-        ? `energy evidence: real for ${e.real_laps} lap(s) · imputed ${e.imputed_laps}`
-        : 'energy evidence: none yet (run the energy simulator for these sessions to make the model ERS-aware)';
-    const lead = m.leader ? `${m.leader.code} (#${m.leader.session_id})` : '? ';
-    const chase = m.chaser ? `${m.chaser.code} (#${m.chaser.session_id})` : '? ';
-    out.innerHTML =
-        `<div class="call-ctx">${lead} vs ${chase} — ${m.track || ''} ${m.date || ''} · from lap ${m.start_lap} · gap ${g0} · ${energyNote} · replaying Balanced vs Push vs Lift &amp; Coast (both cars) + AS RACED baseline</div>` +
-        verdict + riskyNote +
-        `<div class="call-cards">${cards}</div>` +
-        `<div class="chart-note" style="margin-top:2px">Click any card to make it THE CALL · full replay charts, per-lap numbers and the projected finishing order are in the <b>Full-Race Breakdown</b> panel below · battery floor = ${CALL_BATT_FLOOR_PCT}% (deck: never defenseless at the flag)</div>`;
-}
 
-function selectCallCard(key) {
-    if (!lastCallRace) return;
-    renderRaceCallCards(lastCallRace, key);
+    // THE CALL narrative.
+    let verdictHtml, subHtml, notes = [];
+    const scNet = scenNet(sc);
+    if (picked.kind === 'pass') {
+        const others = scenarios.filter(x => x !== pick);
+        if (scenIsBalanced(sc)) {
+            const cons = scenarios.find(x => scenNet(x.scenario) < -1e-9);
+            const consPasses = cons && cons.live.call.verdict === 'attack';
+            const consS = cons && cons.live.summary || {};
+            verdictHtml = `<div class="pass-verdict"><span>▲ OVERTAKE ON LAP</span>` +
+                `<span class="pass-lap-big">${c.pass_lap}</span>` +
+                `<span>— NO ERS NEEDED · run Balanced</span></div>`;
+            subHtml = `Balanced alone projects the clean pass on <b>L${c.pass_lap}</b> (cum P ${livePct(c.cumulative_probability)}%) — the tyre edge does the work, no deployment required.`;
+            if (consPasses) {
+                subHtml += ` Even <b>${cons.scenario.label}</b> still gets there${consS.ers_banked_mj != null ? ' and banks ~' + consS.ers_banked_mj.toFixed(2) + ' MJ' : ''}, but on a thinner margin (cum P ${livePct(cons.live.call.cumulative_probability)}%) — take the pass on Balanced and keep the store.`;
+            }
+        } else if (scNet < -1e-9) {
+            verdictHtml = `<div class="pass-verdict"><span>▲ OVERTAKE ON LAP</span>` +
+                `<span class="pass-lap-big">${c.pass_lap}</span>` +
+                `<span>— WHILE CONSERVING</span></div>`;
+            subHtml = `<b>${sc.label}</b> still makes the pass while banking the store (${battStart} → ${socEndOf(r)}) — the cleanest outcome when it converts.`;
+        } else {
+            const endPct = s.chaser_soc_end_pct;
+            verdictHtml = `<div class="pass-verdict"><span>▲ OVERTAKE ON LAP</span>` +
+                `<span class="pass-lap-big">${c.pass_lap}</span>` +
+                `<span>— MUST PUSH to make it happen</span></div>`;
+            subHtml = `Balanced shows no clean pass, but <b>${sc.label}</b> deployment closes the window: expected on <b>L${c.pass_lap}</b> with the store at <b>${endPct != null ? endPct + '%' : '?'}</b> after.`;
+            if (s.ers_energy_limited_laps) {
+                notes.push(`⚠ The push ran the store to the 30% floor on ${s.ers_energy_limited_laps} lap(s) — the pace reverts to Balanced there, so the pass timing already assumes the edge fades.`);
+            }
+        }
+        const waste = others.find(x => scenNet(x.scenario) > scNet);
+        if (waste && scenNet(waste.scenario) > 1e-9
+                && waste.live.call.verdict === 'attack') {
+            notes.push(`${waste.scenario.label} buys nothing extra here (same pass, battery ${socEndOf(waste.live)}) — don't spend energy a lighter setting already earns.`);
+        }
+    } else if (picked.kind === 'attempt') {
+        verdictHtml = `<div class="pass-verdict no-pass" style="color:#ffb300;border-color:#ffb30055">` +
+            `<span>ATTACKABLE — NOT A CONVERTED PASS</span></div>`;
+        subHtml = `Every setting gets the pair inside ~${LIVE_WINDOW_S}s${c.window_open_lap ? ' (from L' + c.window_open_lap + ')' : ''}, but none converts before the flag: cumulative P tops out at <b>${livePct(c.cumulative_probability)}%</b>. In the backtest a projected pass converted only ~${Math.round(100 * BT_PASS_CONVERT_RATE)}% of the time — treat this as <b>a window worth attacking, not a guaranteed move</b>, and only spend energy if the position is worth the risk.`;
+        if (scNet < -1e-9) {
+            notes.push(`Conserving (${sc.label}) already opens the window — banking the store while staying close is the low-risk play.`);
+        }
+    } else {
+        verdictHtml = `<div class="pass-verdict no-pass"><span>NO CLEAN OVERTAKE</span>` +
+            `<span class="pass-extra">— CONSERVE TO THE FLAG</span></div>`;
+        const push = scenarios.find(x => scenNet(x.scenario) > 1e-9);
+        const cons = scenarios.find(x => scenNet(x.scenario) < -1e-9);
+        subHtml = `None of the settings opens a real window before the flag${scenIsBalanced(sc) ? '' : " — the gap just isn't closable on this tyre state"} (projected ${s.projected_final_gap_s}s apart at the flag, ${netTxt}).`;
+        if (push) {
+            const ps = push.live.summary || {};
+            const pc = push.live.call || {};
+            subHtml += ` Pushing changes none of that: it would spend <b>${ps.ers_deployed_mj != null ? ps.ers_deployed_mj.toFixed(2) + ' MJ' : 'energy'}</b> to still show ${pc.verdict === 'none' ? 'no window' : 'no pass'} — and the backtest's own high-confidence calls converted only ~${Math.round(100 * BT_HIGH_CONF_CONVERT_RATE)}% of the time, so there is no pass to buy here.`;
+        }
+        if (cons) {
+            const cs = cons.live.summary || {};
+            subHtml += ` The call is <b>${cons.scenario.label} to the flag</b> — bank the store (${battStart} → ${socEndOf(cons.live)}${cs.ers_banked_mj != null ? ', ~' + cs.ers_banked_mj.toFixed(2) + ' MJ banked' : ''}) for the next fight instead of burning it on a dead battle.`;
+        }
+    }
+    if (m.extrapolation_note) {
+        notes.push(`⚠ Tyres run to the flag — projected ${Math.max(s.projected_flag_tyre_ages[0], s.projected_flag_tyre_ages[1])} laps old; the model is extrapolating past realistic stint life (no pit-stop model). Re-run after each stop.`);
+    }
+    const noteHtml = notes.length
+        ? notes.map(n => `<div class="chart-note" style="color:#ffb300;margin-top:6px">${n}</div>`).join('')
+        : '';
+
+    // Detailed facts + lap table for the recommended run.
+    const laps = r.laps || [];
+    const fmtDelta = (d) => (d >= 0 ? '+' : '') + d.toFixed(2);
+    const ersShapeTxt = sc.deltas ? sc.deltas.map((d, i) => 'S' + (i + 1) + ' ' + fmtDelta(d)).join(' · ')
+        + ` (net ${fmtDelta(scNet)} MJ/lap)` : '—';
+    const facts = [
+        ['BATTERY START', battStart + (battOverridePct != null
+            ? ' (your input — 30% floor enforced)'
+            : ' (working-band default — set it above when you have a live SOC estimate)')],
+        ['CHASER ERS SHAPE', ersShapeTxt],
+        ['ERS S/MJ ON TRACK', ersMeta.sec_per_mj != null ? ersMeta.sec_per_mj.toFixed(3) + ' s/MJ (per sector ' + (ersMeta.sector_pace_s_per_mj || []).map((p, i) => 'S' + (i + 1) + ' ' + p.toFixed(3)).join(' / ') + ')' : '—'],
+        ['MODELS', m.models || 'aggregate career pace'],
+        ['NET PACE EDGE (' + sc.label + ')', netTxt],
+        ['CLOSEST APPROACH', s.closest_lap ? `${s.min_gap_s}s on L${s.closest_lap}` : '—'],
+        ['BEST SINGLE-LAP P', s.best_probability_lap ? `${livePct(s.best_lap_probability)}% on L${s.best_probability_lap}` : '—'],
+        ['TYRES AT THE FLAG', `${m.leader} ${lt.compound} → ${s.projected_flag_tyre_ages[0]} laps · ${m.chaser} ${ct.compound} → ${s.projected_flag_tyre_ages[1]} laps`],
+    ];
+    const factHtml = facts.map(f =>
+        `<div style="display:flex;justify-content:space-between;gap:14px;padding:3px 0;border-bottom:1px solid #ffffff0d">` +
+        `<span style="font-family:'Share Tech Mono',monospace;font-size:0.62em;letter-spacing:1px;color:#778">${f[0]}</span>` +
+        `<span style="color:#ddd;text-align:right">${f[1]}</span></div>`).join('');
+    const COLS = 'grid-template-columns:52px 74px 96px 1fr;';
+    const rows = laps.map((l, i) => {
+        const prev = i > 0 ? laps[i - 1].gap_before_s : null;
+        const gapCol = prev == null ? '#ddd' : (l.gap_before_s < prev ? '#00c853' : '#ff6b6b');
+        const paceTxt = (l.pace_gap_s >= 0 ? '+' : '') + l.pace_gap_s.toFixed(2);
+        const winTd = l.in_window
+            ? `<span>P <b style="color:${l.overtake_probability >= 0.3 ? '#ff6b6b' : '#ffd700'}">${livePct(l.overtake_probability)}%</b> · Σ ${livePct(l.cumulative_probability)}%</span>`
+            : '<span style="color:#556">—</span>';
+        const isPass = l.lap === c.pass_lap;
+        return `<div class="tbl-row${isPass ? ' pass-row' : ''}" style="${COLS}">` +
+            `<span>${isPass ? '▲ ' : ''}L${l.lap}</span>` +
+            `<span style="color:${gapCol}">${l.gap_before_s.toFixed(2)}s</span>` +
+            `<span style="color:${l.pace_gap_s >= 0 ? '#00c853' : '#ff6b6b'}">${paceTxt}</span>` +
+            winTd + `</div>`;
+    }).join('');
+    const winTxt = c.window_open_lap
+        ? `attack window opens L${c.window_open_lap}`
+        : 'pair never gets inside ~' + LIVE_WINDOW_S + 's';
+
+    out.innerHTML =
+        `<div class="call-ctx">${m.leader} vs ${m.chaser} · ${m.track}${m.year ? ' ' + m.year : ''} · LIVE from L${m.start_lap} of ${m.race_length} · gap ${m.gap_before_s}s · leader ${lt.compound} ${lt.age} laps (Balanced) · chaser ${ct.compound} ${ct.age} laps — one run per ERS setting</div>` +
+        verdictHtml + subHtml + noteHtml +
+        `<div class="call-cards">${cards}</div>` +
+        `<div class="panel-title" style="margin-top:14px">Under THE CALL (${sc.label}) — ${winTxt} · PACE EDGE + = chaser faster</div>` +
+        `<div style="margin:10px 0;background:#101014;border:1px solid #ffffff14;border-radius:8px;padding:6px 10px">${factHtml}</div>` +
+        `<div style="background:#101014;border:1px solid #ffffff14;border-radius:8px;padding:6px 10px;max-height:280px;overflow-y:auto">` +
+        `<div class="tbl-row tbl-head" style="${COLS}">` +
+        `<span>LAP</span><span>GAP</span><span>PACE EDGE</span><span>IN WINDOW (P → Σ)</span></div>` +
+        rows +
+        `</div>` +
+        `<div class="chart-note" style="margin-top:4px">Each card = the same live race under a different chaser ERS sector shape (leader Balanced) — the deltas are worth each sector's measured s/MJ. Conversion odds are from the backtest sample; re-run scripts/backtest_race_calls.py on the full sweep to refresh them. Real races add SCs, mistakes and traffic the models don't see.</div>`;
 }
 
 async function runFullRaceSim() {

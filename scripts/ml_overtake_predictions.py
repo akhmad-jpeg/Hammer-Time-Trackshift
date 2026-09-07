@@ -71,6 +71,7 @@ from overtake_inference import (
     compute_pace_gap,
     tyre_advantage,
     covered_tracks,
+    _canonical_track_name,
 )
 
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
@@ -329,7 +330,7 @@ def build_features(pairs):
             "energy_diff_mj": round(energy_diff, 3),
             "phase": race_phase_index(int(r["lap_number"])),
             "era": era_bucket(int(r["year"])),
-            "track_name": str(r["track_name"]).strip().title(),
+            "track_name": _canonical_track_name(r["track_name"]),
             "closing_rate_s": r["closing_rate_s"],
             "overtake": r["overtake"],
         })

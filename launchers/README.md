@@ -13,7 +13,7 @@ back to the `python` on your PATH.
 |---|------|--------------|-------|
 | 01 | `01_setup_dependencies.bat` | Creates `.venv` if missing and installs `requirements.txt` | Run once; needs internet |
 | 02 | `02_import_race.bat` | Imports **one** race (year / race / session / driver) from FastF1 into MySQL | Interactive; re-downloads `f1_cache\` on first run |
-| 03 | `03_import_dataset.bat` | Batch-imports one driver across many races/seasons | More data → better model |
+| 03 | `03_import_dataset.bat` | Batch-imports one or more drivers across many races/seasons | More data → better model |
 | 04 | `04_audit_pit_events.bat` | Checks pit-event consistency (dry run), asks before applying fixes | Optional but recommended after imports |
 | 05 | `05_train_model.bat` | Trains LinearRegression vs RandomForest, saves the winner to `ml_models\` **plus one model per driver** in `ml_models\drivers\` | **The training step** |
 | 06 | `06_run_server.bat` | Starts the Flask/Waitress dashboard at http://localhost:5000 | Ctrl+C to stop |

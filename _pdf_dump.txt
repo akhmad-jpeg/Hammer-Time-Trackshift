@@ -1,0 +1,247 @@
+
+===== PAGE 1 =====
+S Y S T E M  O N L I N E  //  T E L E M E T R Y  A C T I V E
+PHASE01
+HAMMERTIMETIME
+B Y  T E A M  U N D E R D O G S
+AI-Driven Energy &
+Overtake Intelligence
+P L A T F O R M  O R I G I N
+BUILT ON THE MOTORSPORTS TELEMETRY PLATFORM
+PASSIVE TELEMETRY
+ACTIVE PIT-WALL DECISION-MAKING
+===== PAGE 2 =====
+T E C H N I C A L  A N A L Y S I S  //  E N E R G Y  M A N A G E M E N T
+The Problem: The Energy vs. Performance Paradox
+PROBLEM STATEMENT
+Energy & Overtake Intelligence - Optimizing finite electrical energy deployment while balancing
+immediate overtake opportunities against long-term race performance and rule compliance.
+THE CORE CONFLICT: THE ENERGY PARADOX
+Drivers face a critical trade-off: deploying 100% electrical energy (ERS) provides immediate
+overtake power but leaves the car defenseless and slow in the final laps.
+METRIC STATUS
+CRITICAL TRADE-OFF
+ERS THRESHOLD
+0.0% MARGIN
+THE DATA GAP
+Current telemetry tools display raw metrics like speed and RPM but fail to provide strategic
+guidance on when to push and how much energy to conserve.
+THE  S TRATE GIC  QU E S TION
+"What if the pit wall had a 'What-If' simulator that
+predicted the exact lap to overtake, while
+guaranteeing the car finishes with enough battery?"
+SPEED
+EFFICIENCY
+SYSTEM_DIAGNOSTIC: UNBALANCED
+RAW DATA ACCESS 100%
+PREDICTIVE INTELLIGENCE 0%
+STRATEGIC_GAP_DETECTED...
+===== PAGE 3 =====
+TELEMETRY
+O U R  S O L U T I O N
+The Strategy Co-Pilot
+A real-time ML engine that transforms raw telemetry into corner-by-corner
+overtake probabilities.
+"Simulates two cars simultaneously to provide actionable pit-wall advice."
+01 Ingest
+Captures live telemetry for Leader (Car A) and
+Chaser (Car B).
+UDP LISTENER
+FASTF1 IMPORTERS
+02 Simulate
+ML engine forecasts lap times under multiple
+energy profiles.
+PUSH MODE
+BALANCED
+LIFT & COAST
+HIGH DRAIN
+OPTIMUM
+RECOVERY
+03 Advise
+Dynamic output for every corner on the
+subsequent lap.
+TARGET OUTPUT
+Overtake %
+Real-time Decision Support
+===== PAGE 4 =====
+T E C H N I C A L  D I F F E R E N T I A T O R S
+Innovation: Why We Are Different
+MO DUL E _0 1 driver_comparison.py
+1. Dual-Agent Modeling
+Unlike isolated simulations, we align speed
+traces of the leader and chaser, predicting
+the exact 'gap delta' closing rate.
+GAP DELTA
+MO DUL E _0 2 dashboard.html
+2. Energy Sandbox
+Integrated interactive sliders allow
+strategists to simulate 'What-If' scenarios
+with backend recalculations in under
+300ms.
+BATTERY PUSH +5%
+RESPONSE TIME
+284ms
+MO DUL E _0 3 best_model.pkl
+3. Physics Guardrails
+Linear Regression over black-box networks
+ensures smooth, monotonic degradation
+curves physically realistic for energy fall-
+off.
+PHYSICS LIMIT
+MONOTONIC DEGRADATION
+Dual-Agent Modeling & Physics-Aware ML
+CORE INTENT
+===== PAGE 5 =====
+S Y S T E M  O V E R V I E W
+System Architecture: How It Works
+  DATA INPUT
+capture_telemetry.py
+Live UDP Stream
+import_f1_race.py
+FastF1 Historical Data
+ STORAGE LAYER
+MySQL utilizing schema.sql
+Dedicated tables for Sessions, Laps, Telemetry, and Drivers.
+
+L O G IC & ML  ENG INE
+Feature Engine
+feature_pipeline.py: Encoding 23 tracks and 5 tyre
+compounds for model ingestion.
+ML Predictor
+ml_models/best_model.pkl: High-performance
+Linear Regression inference engine.
+STATUS: OPERATIONAL LATENCY: < 5MS ENGINE: V6-HYBRID-SIM
+♞ STRATEGY MODULES
+ stint_analysis.py
+Tyre Degradation Modeling
+⛽ fuel_estimation.py
+Fuel Burn Optimization
+ FRONTEND INTERFACE
+Flask + Plotly
+Real-time strategic visualizer.
+dashboard.py dashboard.html
+===== PAGE 6 =====
+A I / M L  D E E P  D I V E
+Physics-Guided Prediction
+MODEL SELECTION FEATURE ENGINEERING
+TOTAL FEATURES
+Monotonic Reliability Matrix
+Continuous Inputs
+tyre_age
+Linear wear projection
+fuel_load
+Calculated via fuel_estimation.py
+Categorical Inputs
+TYRE COMPOUNDS 5 Units
+TRACK CIRCUITS 23 Units
+Standardized via One-Hot Encoding to ensure unbiased track-
+specific performance weighting.
+MOD E L  OBJE C TIVE
+Target Variable: lap_time
+[seconds]
+PREDICTIVE ACCURACY: MONOTONIC
+VAL ID ATE D  VIA BE NC HMARK _ MOD E L S . PY
+Linear Regression
+Chosen over Random Forest to ensure smooth,
+monotonic tyre degradation curves. This architectural
+decision prevents "staircase" artifacts in simulation,
+ensuring realistic physical transitions.
+PH YSICS CO N SISTE N CY CH E CK : L R V S RF
+RANDOM FOREST (Non
+LINEAR REGRESSION (Physics-Guided)
+29
+===== PAGE 7 =====
+S T R AT E G Y  O P T I M I Z AT I O N  //  D ATA  S Y N T H E S I S
+THE NEW ENERGY LAYER: 
+ENGINEERING THE MISSING DATA
+ SYSTEM INTEGRATION
+ STATUS: Identifying Optimal 'Push' Windows
+SOLVING THE DATA GAP
+Since the F1 API does not broadcast battery percentage, we developed
+energy_simulator.py to synthesize this critical metric in real-time.
+The Energy_Remaining column is injected into feature_pipeline.py,
+enabling precise ML strategy forecasting.
+SIMULATION LOGIC
+CONSUMPTION
+-2% / sec
+100% Throttle
+RECOVERY
++0.5%
+Regenerative Charge
+
+THROTTLE API
+⏹
+BRAKE INPUT
+ENERGY_REMAINING
+ML STRATEGY
+SYNTHESIS ENGINE
+energy_simulator.py
+CALCULATED METRIC
+→
+
+===== PAGE 8 =====
+P E R F O R M A N C E  &  A C C U R A C Y
+Validation Strategy: Performance & Accuracy
+Performance Benchmarks
+<2ms
+INFERENCE SPEED
+Lap-time prediction via benchmark_models.py
+<500ms
+SIMULATION SPEED
+20-lap full race simulation cycle
+// SYSTEM_READY_LATENCY_OPTIMIZED
+Back-testing
+SCENARIO: 2023 MONACO GP
+Model initialized with first 5 laps of
+telemetry data only.
+AI PREDICTION
+Lap 12
+ACTUAL EVENT
+Lap 13
+±1
+L A P  A C C U R A C Y
+Strategic Advantage
+AI-assisted strategy vs. 'Flat-Out' human
+baseline approach.
+Full compliance with FIA Battery Minimums
+maintained throughout simulation.
+CORE VALIDATION CONCLUSION:
+Proven accuracy within ±1 lap and a 1.8s race
+time improvement in real-world scenarios.
+T O TA L  R A C E  T I M E  D E L TA
+-1.8 s
+===== PAGE 9 =====
+L I V E  D E M O
+Interactive Strategy Dashboard
+Interactive Flask Dashboard
+Energy Deployment Slider
+Real-time adjustment between Push, Balanced, and Lift & Coast
+modes.
+Live Projected Leaderboard
+Instant updates to the finishing order based on current
+simulation parameters.
+Telemetry Visualization
+High-fidelity Plotly charts integrated directly into the strategist's
+view.
+INTE GRATE D  S IMU L ATION E NVIRONME NT
+"A professional-grade Flask dashboard for
+instant strategy manipulation and
+visualization."
+L IV E  TE L E ME TRY
+SIMULATION_ACTIVE // RECV_STRAT_DATA_01X
+Project Foundation: https://github.com/akhmad-jpeg/Motorsports-telemetry
+===== PAGE 10 =====
+CONCLUSIONCONCLUSIONCONCLUSION
+FUTURE SCOPE
+BUILT FOR F1.
+READY FOR THE FUTURE.
+T E C H N I C A L  S U M M A R Y
+SUMMARY OF ACHIEVEMENTS AND ROADMAP FOR
+FUTURE DEVELOPMENT.
+M I S S I O N  P R O F I L E  C O M P L E T E
+&
+S T AT U S
+OPTIMIZED
+VELOC IT Y
+MAX
+FINISH_LINE
