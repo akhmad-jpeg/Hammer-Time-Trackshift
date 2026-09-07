@@ -205,6 +205,48 @@ def resolve_race_input(raw_input: str, calendar: list[str]) -> str:
     return token
 
 
+def fetch_grid_from_fastf1(year: int, race_name: str) -> list[dict]:
+    """
+    Lightweight warm-up: read the full driver grid for a FastF1 race session.
+
+    Loads only the session driver list (no laps/telemetry/weather/messages),
+    so it is cheap enough to run once before a batch import to populate the
+    drivers table.  Returns rows shaped like the drivers table:
+        [{"driver_id": int, "driver_code": str, "driver_name": str}, ...]
+    keyed on the session's DriverNumbers, sorted by number.
+
+    Raises RuntimeError when FastF1 is unavailable or the session cannot load.
+    """
+    if fastf1 is None:
+        raise RuntimeError(
+            "fastf1 is not installed — run `pip install fastf1` to import "
+            "historical race data."
+        )
+    try:
+        session = fastf1.get_session(year, race_name, "R")
+        session.load(laps=False, telemetry=False, weather=False, messages=False)
+    except Exception as exc:
+        raise RuntimeError(
+            f"FastF1 could not load {year} {race_name} for the warm-up pass: {exc}"
+        ) from exc
+
+    grid: list[dict] = []
+    for number in session.drivers:
+        try:
+            info = session.get_driver(number)
+        except Exception:
+            logging.warning(f"  Skipping driver #{number}: FastF1 returned no info")
+            continue
+        code = str(info["Abbreviation"]).strip().upper()
+        grid.append({
+            "driver_id": int(info["DriverNumber"]),
+            "driver_code": code,
+            "driver_name": str(info.get("FullName") or code),
+        })
+    grid.sort(key=lambda d: d["driver_id"])
+    return grid
+
+
 # ---------------------------------------------------------------------------
 # Reference-table helpers
 # ---------------------------------------------------------------------------
@@ -298,6 +340,58 @@ def upsert_driver_from_fastf1(cursor, driver_id: int, driver_code: str, driver_n
             "INSERT INTO drivers (driver_id, driver_code, driver_name) VALUES (%s, %s, %s)",
             (driver_id, driver_code, driver_name),
         )
+
+
+def seed_drivers_from_grid(grid: list[dict]) -> int:
+    """
+    Insert driver rows for a FastF1 grid into the drivers table.
+
+    Code-collision aware (driver_code is UNIQUE): a code already present keeps
+    its permanent driver_id and name — same no-overwrite policy as
+    upsert_driver_from_fastf1.  New codes are stored under their session
+    DriverNumber; on the rare case where that id already belongs to a
+    different driver, the next free id is used instead (with a warning).
+
+    Returns the number of new rows inserted.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    inserted = 0
+    try:
+        cursor.execute("SELECT driver_id, driver_code FROM drivers")
+        used_ids: set[int] = set()
+        existing_codes: dict[str, int] = {}
+        for d_id, code in cursor.fetchall():
+            used_ids.add(d_id)
+            existing_codes[code] = d_id
+
+        for row in grid:
+            code = row["driver_code"]
+            if not code or code in existing_codes:
+                continue
+            driver_id = row["driver_id"]
+            if driver_id in used_ids:
+                cursor.execute("SELECT COALESCE(MAX(driver_id), 0) + 1 FROM drivers")
+                driver_id = cursor.fetchone()[0]
+                logging.warning(
+                    f"Driver {code} wears #{row['driver_id']} this season but that "
+                    f"id already belongs to another driver — storing under #{driver_id}."
+                )
+            cursor.execute(
+                "INSERT INTO drivers (driver_id, driver_code, driver_name) VALUES (%s, %s, %s)",
+                (driver_id, code, row["driver_name"]),
+            )
+            used_ids.add(driver_id)
+            existing_codes[code] = driver_id
+            inserted += 1
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+    return inserted
 
 
 def check_existing_session(cursor, track_id: int, season_id: int, driver_id: int,

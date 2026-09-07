@@ -33,6 +33,7 @@ NOTE: this module is import-safe (no side effects at import time), the same
 convention as driver_comparison.py.
 """
 
+import json
 from bisect import bisect_right
 from pathlib import Path
 
@@ -84,6 +85,34 @@ def _normalise_track_name(track_name):
     return str(track_name).strip().title()
 
 
+# The importer stored some circuits under names that differ from the ones
+# the overtake model was trained on, so those races scored with an all-zero
+# track one-hot (no circuit signal).  Canonicalise to the name the overtake
+# model was trained on so they actually get the circuit row.  Each alias is
+# backed by the race-call backtest (scripts/backtest_race_calls.py):
+#   * Monaco 2022/2023/2025 ('Monaco') vs training 'Circuit de Monaco'
+#     (2021/2026) — headline 2023 Monaco race, 53 scan checkpoints.
+#   * Miami 2022/2023 ('Miami International Autodrome') vs training
+#     'Miami Gardens' (2025/2026) — 27 scan checkpoints, 8 real on-track
+#     passes (5 correctly called), so the circuit row matters there.
+# Tracks the model has NO column for cannot be aliased and still score
+# zero-row until retrained on them: Marina Bay (2022/2023/2025), Las Vegas
+# Strip Circuit (2023/2025), Autodromo Internazionale del Mugello (2020).
+TRACK_ALIASES = {
+    "Monaco": "Circuit De Monaco",
+    "Miami International Autodrome": "Miami Gardens",
+}
+
+
+def _canonical_track_name(track_name):
+    """Normalised track name with the stored short names aliased to the
+    overtake model's canonical circuit name (see TRACK_ALIASES).  Used only
+    for the overtake feature row / coverage flag — the per-driver lap models
+    legitimately cover both spellings, so their pace path is left untouched."""
+    name = _normalise_track_name(track_name)
+    return TRACK_ALIASES.get(name, name)
+
+
 def covered_tracks(feature_names):
     """Sorted track names the overtake model can predict for (title-cased)."""
     return sorted(f.replace("track_", "") for f in feature_names
@@ -114,7 +143,7 @@ def construct_pair_row(gap_before_s, pace_gap_s,
     compound / phase / era / track value absent from training stays a clean
     all-zero term instead of a missing column.
     """
-    track_name = _normalise_track_name(track_name)
+    track_name = _canonical_track_name(track_name)
 
     row = pd.DataFrame(0, index=[0], columns=feature_names)
 
@@ -1340,7 +1369,7 @@ def _predict_pair_with(closing_model, overtake_model, feature_names,
         "closing_rate_s": round(closing, 4),
         "overtake_probability": round(prob, 4),
         "energy_clipped": energy_clipped,
-        "track_covered": _normalise_track_name(track_name) in covered_tracks(feature_names),
+        "track_covered": _canonical_track_name(track_name) in covered_tracks(feature_names),
     }
 
 
@@ -1368,3 +1397,434 @@ def predict_overtake(gap_before_s, pace_gap_s,
         fuel_diff_kg=fuel_diff_kg, energy_diff_mj=energy_diff_mj,
         lap_number=lap_number, track_name=track_name, year=year,
     )
+
+
+# ---------------------------------------------------------------------------
+# LIVE RACE CALL — forward projection on the AGGREGATE (career) pace models.
+#
+# The full-race simulator above replays two drivers' STORED race sessions,
+# which only exists after a race has finished.  simulate_live_call instead
+# projects the live race forward with no stored session at all: each driver's
+# career aggregate model (ml_models/drivers/<code>/, all seasons) predicts
+# their lap time on the shared (track, compound, tyre age, lap) context, the
+# gap moves by that predicted pace edge every lap, and once the pair is
+# inside the attack window (~1.2 s — where the P0 overtake signal actually
+# lives) the per-lap overtake probability is accumulated as a hazard so the
+# call can say "expect the pass on lap X" instead of only "pass / no pass".
+# Tyre ages advance one lap at a time; compounds are held fixed (no pit-stop
+# model — see the extrapolation flag).  ERS state is not broadcast live, so
+# fuel/energy terms are neutral unless the caller passes an ERS lever for the
+# CHASER only (a live pit wall can advise the attacking car, not the one
+# ahead — the leader is assumed Balanced).  The lever mirrors the Energy
+# Sandbox's per-sector deploy-delta sliders (S1/S2/S3 in MJ); a flat posture
+# int (-100..100) is accepted as a shortcut that applies the same delta to
+# all three sectors.  See the constants below the LIVE_* block.
+# ---------------------------------------------------------------------------
+LIVE_WINDOW_S = 1.2            # within this gap the P0 signal is meaningful
+LIVE_PASS_CUM = 0.8            # cumulative P(overtake) treated as the pass
+                               #   Raised from 0.5 after the race-call backtest
+                               #   (scripts/backtest_race_calls.py): 0.5 fires an
+                               #   instant attack whenever a single-lap P exceeds
+                               #   it (e.g. Monaco 2023 L5 seed: gap 0.573 s +
+                               #   1.4 s/lap pace edge -> single-lap P 0.5455 ->
+                               #   "pass lap 5" although the real window opens L6
+                               #   and no pass ever happens).  0.8 lands in the
+                               #   better-calibrated band (real pass rate 24.7%
+                               #   for P >= 0.8 vs 12.9% for [0.5, 0.8)) and
+                               #   shifts that call to L6 = the real window lap,
+                               #   with only a ~2pp recall cost on races that
+                               #   actually contain passes.
+LIVE_MAX_SINGLE_STINT = 42     # beyond this tyre age the walk is extrapolating
+
+# Simplified live ERS overlay (chaser-only — you can only advise the chaser;
+# the leader is assumed Balanced).  Mirrors the energy deck's units: 4 MJ
+# usable store (1% = 0.04 MJ), full at the grid, soft 30% floor below which a
+# car cannot sustain deployment and reverts to Balanced pace.  Deployment /
+# banking is converted to lap time with the track's seconds-per-MJ scaling
+# from ml_models/energy_pace.json (anchor 0.35 s/MJ x full-throttle share).
+ERS_MAX_MJ_LAP = 0.12          # full slider deflection = this much MJ/lap
+ERS_STORE_MJ = 4.0             # usable Energy Store capacity
+ERS_FLOOR_MJ = 1.2             # 30% of the store (below: cannot sustain)
+ERS_DEFAULT_START_PCT = 62.5   # mid-race SOC default (deck's working band)
+ERS_ANCHOR_S_PER_MJ = 0.35     # crude pace benefit of 1 MJ (energy deck)
+ERS_FLEET_FT_SHARE = 0.6703    # fleet-mean full-throttle share (energy deck)
+
+_ENERGY_PACE_CFG = {}
+
+
+def track_seconds_per_mj(track_name):
+    """Lap-time value of one deployed MJ on this circuit (s/MJ).
+
+    Reads the energy deck's measured full-throttle share per track and
+    scales the 0.35 s/MJ anchor relative to the fleet mean, so high-speed
+    circuits (more time spent at full throttle) value deployment lower than
+    stop-and-go circuits.  Falls back to the fleet mean when the track is
+    not in the calibration file.
+    """
+    if not _ENERGY_PACE_CFG:
+        cfg = {}
+        try:
+            cfg = json.loads(
+                (PROJECT_ROOT / "ml_models" / "energy_pace.json")
+                .read_text(encoding="utf-8"))
+        except Exception:
+            cfg = {}
+        _ENERGY_PACE_CFG.update(cfg)
+    cfg = _ENERGY_PACE_CFG
+    anchor = float(cfg.get("anchor_pace_s_per_mj") or ERS_ANCHOR_S_PER_MJ)
+    fleet = float(cfg.get("fleet_full_throttle_share")
+                  or ERS_FLEET_FT_SHARE)
+    per = cfg.get("per_track", {}) or {}
+    ft = (per.get(_normalise_track_name(track_name)) or {})\
+        .get("full_throttle_share")
+    if not ft:
+        ft = fleet
+    return anchor * (float(ft) / fleet)
+
+
+def track_sector_seconds_per_mj(track_name):
+    """Per-sector s/MJ values (S1/S2/S3) for a circuit from the energy deck.
+
+    Mirrors the energy sandbox's sector pacing: each sector's deployment is
+    worth a different amount of lap time (its measured full-throttle share).
+    Falls back to the flat track pace on all three sectors when the track
+    is not in the calibration file.
+    """
+    if not _ENERGY_PACE_CFG:
+        track_seconds_per_mj(track_name)  # warms the shared cache
+    per = _ENERGY_PACE_CFG.get("per_track", {}) or {}
+    sec = (per.get(_normalise_track_name(track_name)) or {})\
+        .get("sector_pace_s_per_mj")
+    if sec and len(sec) == 3:
+        return [float(x) for x in sec]
+    p = track_seconds_per_mj(track_name)
+    return [p, p, p]
+
+
+def simulate_live_call(leader_code, chaser_code, track_name,
+                       start_lap=1, race_length=57, gap_before_s=0.8,
+                       leader_tyre_compound="Medium",
+                       chaser_tyre_compound="Medium",
+                       leader_tyre_age=10, chaser_tyre_age=10,
+                       year=None, window_s=None, pass_cum=None,
+                       chaser_ers=None, chaser_ers_deltas=None,
+                       chaser_battery_pct=None,
+                       models_dir=None):
+    """Live forward-projection race call (no stored sessions required).
+
+    The two drivers' AGGREGATE per-driver pace models (all seasons — the
+    era/season year only selects the era level and is never used to load a
+    per-year model) predict the head-to-head pace edge each lap from the
+    current tyre context; the gap shrinks/grows by that edge; and once the
+    pair is inside ``window_s`` the P0 overtake classifier's per-lap
+    probability is accumulated (1 - product(1 - p_i)) until it crosses
+    ``pass_cum`` — that lap is the projected pass.  Tyre age ticks up one
+    lap at a time on both cars, compounds held fixed to the flag.
+
+    ``chaser_ers_deltas`` (optional, 3 MJ values) is the CHASER-only ERS
+    lever, expressed exactly like the Energy Sandbox: a per-sector deploy
+    delta (S1/S2/S3) in MJ.  Each sector's delta is worth that sector's
+    measured s/MJ, so a pure reallocation (net zero) still shapes lap time
+    while staying store-neutral; a positive net deploys from the 4 MJ store
+    (faster, drawn down to the 30% floor), a negative net banks energy
+    (slower, capped at a full store).  ``chaser_ers`` (-100..100) is
+    accepted as a shortcut that applies the same delta to all three sectors
+    (flat posture).  The battery is assumed mid-race in the deck's working
+    band (default ~62.5%; override with ``chaser_battery_pct``).  When the
+    store hits its 30% floor the car reverts to Balanced pace and the lap is
+    counted as energy-limited.  ERS is treated neutral when omitted.
+
+    Returns:
+      meta       — drivers, track, season, start/end lap, gap and the tyre
+                   state the projection starts from, the ERS posture applied
+                   (leader always 'balanced'), plus a note when the projected
+                   single-stint age exceeds what the data supports
+      laps       — per-lap rows {lap, gap_before_s, pace_gap_s, in_window,
+                   overtake_probability, cumulative_probability,
+                   chaser_soc_pct?} (SOC column present when chaser_ers is on)
+      call       — {verdict: 'attack' | 'attempt' | 'no_window', pass_lap,
+                   window_open_lap, laps_to_window, cumulative_probability}
+      summary    — averages for the UI narrative (avg pace edge, closest
+                   approach, best single-lap P, projected final gap/age,
+                   and ERS bookkeeping when the lever is used)
+
+    Raises ValueError with a clear reason when the pair cannot be scored
+    (same driver, bad numbers, or a driver's aggregate model does not cover
+    the track / tyre).
+    """
+    leader_code = str(leader_code).strip().upper()
+    chaser_code = str(chaser_code).strip().upper()
+    if leader_code == chaser_code:
+        raise ValueError("Pick two different drivers.")
+    track_name = str(track_name).strip()
+    start_lap = int(start_lap)
+    race_length = int(race_length)
+    if start_lap < 1:
+        raise ValueError("start_lap must be >= 1")
+    if race_length < start_lap:
+        raise ValueError(
+            f"race_length {race_length} is before the current lap "
+            f"{start_lap} — set the race's total lap count.")
+    gap = float(gap_before_s)
+    if gap <= 0:
+        raise ValueError("gap_before_s must be > 0")
+    l_comp = str(leader_tyre_compound or "Medium").strip()
+    c_comp = str(chaser_tyre_compound or "Medium").strip()
+    l_age = float(leader_tyre_age or 0.0)
+    c_age = float(chaser_tyre_age or 0.0)
+    if l_age < 0 or c_age < 0:
+        raise ValueError("tyre ages must be >= 0")
+    l_age_0 = int(l_age)
+    c_age_0 = int(c_age)
+    window = float(window_s or LIVE_WINDOW_S)
+    cum_target = float(pass_cum or LIVE_PASS_CUM)
+    if not (0 < window <= 10):
+        raise ValueError("window_s must be in (0, 10]")
+    if not (0 < cum_target < 1):
+        raise ValueError("pass_cum must be in (0, 1)")
+
+    # Chaser-only ERS lever (leader stays Balanced).  None / all-zeros =
+    # neutral.  The lever is a per-sector deploy-delta vector (S1/S2/S3 MJ)
+    # exactly like the Energy Sandbox; the flat posture int (-100..100) is a
+    # shortcut that applies the same delta to all three sectors.
+    ers_deltas = None
+    if chaser_ers_deltas is not None:
+        try:
+            d = [float(x) for x in list(chaser_ers_deltas)]
+        except (TypeError, ValueError):
+            raise ValueError(
+                "chaser_ers_deltas must be 3 numbers (MJ per sector)")
+        if len(d) != 3:
+            raise ValueError(
+                "chaser_ers_deltas must be 3 numbers (MJ per sector)")
+        ers_deltas = [max(-8.5, min(8.5, x)) for x in d]
+    elif chaser_ers not in (None, "", 0, "0"):
+        try:
+            e = max(-100.0, min(100.0, float(chaser_ers)))
+        except (TypeError, ValueError):
+            raise ValueError("chaser_ers must be a number between -100 and 100")
+        if abs(e) >= 0.5:
+            spread = (e / 100.0) * ERS_MAX_MJ_LAP
+            ers_deltas = [spread, spread, spread]
+    if ers_deltas is not None and all(abs(x) < 1e-9 for x in ers_deltas):
+        ers_deltas = None
+    net_mj = sum(ers_deltas) if ers_deltas is not None else 0.0
+    # Seconds-per-MJ is a property of the circuit, so it is always reported
+    # (and used whenever the ERS lever is on).
+    sec_per_mj = track_seconds_per_mj(track_name)
+    sec_pace = track_sector_seconds_per_mj(track_name)
+    # Lap-time value of the full shape at full delivery (s/lap): each sector
+    # delta is worth that sector's measured s/MJ.  Zero-sum reallocation can
+    # therefore still gain (or cost) time without touching the store.
+    ers_shape_s = (sum(x * p for x, p in zip(ers_deltas, sec_pace))
+                   if ers_deltas is not None else 0.0)
+    if ers_deltas is not None:
+        try:
+            start_pct = float(chaser_battery_pct or ERS_DEFAULT_START_PCT)
+        except (TypeError, ValueError):
+            start_pct = ERS_DEFAULT_START_PCT
+        start_pct = max(30.0, min(100.0, start_pct))
+        soc_mj = ERS_STORE_MJ * start_pct / 100.0
+    else:
+        soc_mj = ERS_STORE_MJ
+        start_pct = None
+    ers_deployed_mj = 0.0
+    ers_banked_mj = 0.0
+    energy_limited_laps = 0
+
+    closing_model, overtake_model, feature_names, _info = \
+        load_overtake_models(models_dir=models_dir)
+
+    # Aggregate (career) pace models — never a per-year model: the caller's
+    # season only selects the era BUCKET inside each driver's aggregate model
+    # (both cars on the same bucket, so a lopsided default era cannot distort
+    # the head-to-head).  Coverage is probed once up-front so the walk never
+    # silently runs on an uncovered circuit / compound.
+    def _load_aggregate_side(code, compound):
+        try:
+            model, fnames, info, _used_year = _load_driver_model_cached(code)
+        except FileNotFoundError as exc:
+            raise ValueError(f"{code}: {exc}")
+        if _normalise_track_name(track_name) not in lap_covered_tracks(fnames):
+            raise ValueError(
+                f"{code}: aggregate career model has no data for "
+                f"'{track_name}' — cannot call this circuit live.")
+        if str(compound).strip() not in lap_covered_tyres(fnames):
+            raise ValueError(
+                f"{code}: aggregate model never raced '{compound}' — "
+                f"covered: {', '.join(lap_covered_tyres(fnames))}.")
+        return model, fnames
+
+    lm, lf = _load_aggregate_side(leader_code, l_comp)
+    cm, cf = _load_aggregate_side(chaser_code, c_comp)
+
+    def _side_time(model, fnames, compound, age, L):
+        row = construct_prediction_input(
+            tyre_age=age, lap_number=L, tyre_compound=compound,
+            track_name=track_name, feature_names=fnames, year=year,
+        )
+        return float(model.predict(row)[0])
+
+    # Probe the first lap so model/coverage errors surface before any walk.
+    _side_time(lm, lf, l_comp, l_age, start_lap)
+    _side_time(cm, cf, c_comp, c_age, start_lap)
+
+    laps = []
+    pass_lap = None
+    window_open_lap = None
+    closest_lap = start_lap
+    closest = float(gap)
+    cum = 0.0
+    best_lap_prob = 0.0
+    best_prob_lap = None
+    pace_sum = 0.0
+    n_scored = 0
+    window_laps = 0
+
+    for L in range(start_lap, race_length + 1):
+        pace = (_side_time(lm, lf, l_comp, l_age, L)
+                - _side_time(cm, cf, c_comp, c_age, L))
+        soc_rec = None
+        if ers_deltas is not None:
+            # Net = MJ/lap the sector shape asks for vs Balanced (positive
+            # deploy, negative bank).  The pace effect is the sector-weighted
+            # shape value scaled by the delivered fraction.  Deployment draws
+            # the store down to the 30% floor; once there the car reverts to
+            # Balanced pace and the lap is counted energy-limited.  Banking
+            # tops out at a full store (no point lifting once full).  A
+            # zero-sum shape (pure reallocation) is fully delivered and
+            # store-neutral — that is the sandbox's reallocate-within-the-lap
+            # case.
+            want = net_mj
+            frac = 1.0 if abs(want) < 1e-9 else 0.0
+            if want > 1e-9:
+                avail = soc_mj - ERS_FLOOR_MJ
+                if avail > 1e-9:
+                    frac = min(1.0, avail / want)
+                    soc_mj -= want * frac
+                    ers_deployed_mj += want * frac
+                if frac < 1.0 - 1e-9:
+                    energy_limited_laps += 1
+            elif want < -1e-9:
+                room = ERS_STORE_MJ - soc_mj
+                if room > 1e-9:
+                    frac = min(1.0, room / (-want))
+                    soc_mj += (-want) * frac
+                    ers_banked_mj += (-want) * frac
+            pace += ers_shape_s * frac   # shape value, scaled by delivery
+            soc_rec = round(100.0 * soc_mj / ERS_STORE_MJ, 1)
+        in_window = gap <= window
+        prob = 0.0
+        if in_window:
+            res = _predict_pair_with(
+                closing_model, overtake_model, feature_names,
+                gap_before_s=gap, pace_gap_s=pace,
+                chaser_tyre_age=c_age, leader_tyre_age=l_age,
+                chaser_tyre_compound=c_comp,
+                leader_tyre_compound=l_comp,
+                fuel_diff_kg=0.0, energy_diff_mj=0.0,
+                lap_number=L, track_name=track_name, year=year,
+            )
+            prob = float(res["overtake_probability"])
+            cum = 1.0 - (1.0 - cum) * (1.0 - prob)
+            window_laps += 1
+            if window_open_lap is None:
+                window_open_lap = L
+            if prob > best_lap_prob:
+                best_lap_prob = prob
+                best_prob_lap = L
+        rec = {
+            "lap": L,
+            "gap_before_s": round(gap, 3),
+            "pace_gap_s": round(pace, 4),
+            "in_window": in_window,
+            "overtake_probability": round(prob, 4),
+            "cumulative_probability": round(min(cum, 0.999), 4),
+        }
+        if soc_rec is not None:
+            rec["chaser_soc_pct"] = soc_rec
+        laps.append(rec)
+        pace_sum += pace
+        n_scored += 1
+        if gap < closest:
+            closest = gap
+            closest_lap = L
+        gap = max(0.05, gap - pace)
+        if cum >= cum_target:
+            pass_lap = L
+            break
+        l_age += 1.0
+        c_age += 1.0
+
+    projected_flag_ages = (
+        l_age_0 + (race_length - start_lap),
+        c_age_0 + (race_length - start_lap),
+    )
+
+    avg_pace = pace_sum / max(1, n_scored)
+    if pass_lap:
+        verdict = "attack"
+    elif window_open_lap is not None:
+        verdict = "attempt"
+    else:
+        verdict = "no_window"
+
+    call = {
+        "verdict": verdict,
+        "pass_lap": pass_lap,
+        "window_open_lap": window_open_lap,
+        "laps_to_window": (window_open_lap - start_lap
+                            if window_open_lap is not None else None),
+        "cumulative_probability": round(min(cum, 0.999), 4),
+    }
+    summary = {
+        "avg_pace_gap_s": round(avg_pace, 4),
+        "min_gap_s": round(closest, 3),
+        "closest_lap": closest_lap,
+        "best_lap_probability": round(best_lap_prob, 4),
+        "best_probability_lap": best_prob_lap,
+        "window_laps": window_laps,
+        "projected_final_gap_s": round(gap, 3),
+        "projected_flag_tyre_ages": list(projected_flag_ages),
+    }
+    if ers_deltas is not None:
+        summary.update({
+            "ers_deployed_mj": round(ers_deployed_mj, 3),
+            "ers_banked_mj": round(ers_banked_mj, 3),
+            "ers_energy_limited_laps": energy_limited_laps,
+            "chaser_soc_end_pct": round(100.0 * soc_mj / ERS_STORE_MJ, 1),
+        })
+    meta = {
+        "leader": leader_code,
+        "chaser": chaser_code,
+        "track": track_name,
+        "year": year,
+        "start_lap": start_lap,
+        "race_length": race_length,
+        "gap_before_s": round(float(gap_before_s), 3),
+        "tyres": {
+            "leader": {"compound": l_comp, "age": l_age_0},
+            "chaser": {"compound": c_comp, "age": c_age_0},
+        },
+        "window_s": window,
+        "models": "aggregate career per-driver pace + P0 overtake classifier",
+        "extrapolation_note": (
+            max(projected_flag_ages) > LIVE_MAX_SINGLE_STINT),
+        "ers": {
+            "leader": "balanced",
+            "chaser": ({"net_mj_per_lap": round(net_mj, 3),
+                         "deltas_mj": [round(x, 3) for x in ers_deltas]}
+                        if ers_deltas is not None else "balanced"),
+            "sec_per_mj": round(sec_per_mj, 4),
+            "sector_pace_s_per_mj": [round(x, 4) for x in sec_pace],
+            "chaser_battery_start_pct": (round(start_pct, 1)
+                                          if ers_deltas is not None
+                                          else None),
+        },
+    }
+    return {
+        "meta": meta,
+        "laps": laps,
+        "call": call,
+        "summary": summary,
+    }

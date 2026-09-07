@@ -11,8 +11,8 @@ echo ============================================================
 echo  F1 STRATEGY PLATFORM - BATCH DATASET IMPORT
 echo ============================================================
 echo.
-echo  Imports one driver across many races / seasons into MySQL.
-echo  You will be asked for: driver, years and races.
+echo  Imports one or more drivers across many races / seasons into MySQL.
+echo  You will be asked for: drivers, years and races.
 echo  The more races you import, the better the trained model.
 echo  (First run re-downloads the FastF1 cache - it can take a while.)
 echo.

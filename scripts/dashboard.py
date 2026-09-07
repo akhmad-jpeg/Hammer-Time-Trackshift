@@ -2715,6 +2715,71 @@ def overtake_sim():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/overtake/live', methods=['POST'])
+def overtake_live():
+    """Live race-call projection: two drivers' AGGREGATE career pace models
+    walk the race forward from the CURRENT tyre state (no stored session
+    replay — usable mid-race).
+
+    Body fields: leader_code, chaser_code, track_name, start_lap (current
+    lap), race_length (total laps), gap_before_s, leader_tyre_compound /
+    leader_tyre_age, chaser_tyre_compound / chaser_tyre_age, year
+    (optional — era level only, never picks a per-year model).  See
+    overtake_inference.simulate_live_call for the mechanics.
+    """
+    _models, _info, err = _load_overtake()
+    if _models is None:
+        return jsonify({"error": err or "Overtake model not loaded"}), 500
+    try:
+        body = request.get_json() or {}
+        leader = str(body.get('leader_code') or '').strip().upper()
+        chaser = str(body.get('chaser_code') or '').strip().upper()
+        track = str(body.get('track_name') or '').strip()
+        if not leader or not chaser or not track:
+            return jsonify({"error": "leader_code, chaser_code and "
+                                      "track_name required"}), 400
+        if leader == chaser:
+            return jsonify({"error": "Pick two different drivers."}), 400
+        year_raw = body.get('year')
+        year = int(year_raw) if year_raw not in (None, "") else None
+        ers_raw = body.get('chaser_ers')
+        chaser_ers = None if ers_raw in (None, "") else float(ers_raw)
+        ers_deltas_raw = body.get('chaser_ers_deltas')
+        chaser_ers_deltas = None
+        if ers_deltas_raw not in (None, "", []):
+            chaser_ers_deltas = [float(x) for x in ers_deltas_raw]
+        batt_raw = body.get('chaser_battery_pct')
+        chaser_battery_pct = (float(batt_raw)
+                              if batt_raw not in (None, "") else None)
+
+        result = overtake_inference.simulate_live_call(
+            leader_code=leader,
+            chaser_code=chaser,
+            track_name=track,
+            start_lap=int(body.get('start_lap') or 1),
+            race_length=int(body.get('race_length') or 57),
+            gap_before_s=float(body.get('gap_before_s') or 0.8),
+            leader_tyre_compound=body.get('leader_tyre_compound')
+                                 or 'Medium',
+            chaser_tyre_compound=body.get('chaser_tyre_compound')
+                                 or 'Medium',
+            leader_tyre_age=float(body.get('leader_tyre_age') or 0.0),
+            chaser_tyre_age=float(body.get('chaser_tyre_age') or 0.0),
+            year=year,
+            chaser_ers=chaser_ers,
+            chaser_ers_deltas=chaser_ers_deltas,
+            chaser_battery_pct=chaser_battery_pct,
+        )
+        resp = jsonify({"live": result})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 OVERTAKE_TRIGGER_PROB = 0.5   # pass fires when per-lap probability crosses this
 BATTLE_END_GAP_S = 10.0       # battle considered over beyond this gap
 
