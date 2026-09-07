@@ -17,6 +17,8 @@ from feature_pipeline import (
     validate_model_inputs,
 )
 import driver_comparison
+import overtake_inference  # import-safe; models load lazily below
+import race_calendar  # official calendars 2020-2026 (single source of truth)
 
 # Battery capacity/floor used to express the synthetic ERS trace as a
 # percentage and to judge feasibility.  Single source of truth lives in the
@@ -189,10 +191,15 @@ def get_sessions():
     try:
         # Pagination: ?limit=&offset= (defaults keep the historical 50-row cap;
         # limit is clamped to [1, 500]).  Optional ?driver=<CODE> filters to
-        # one driver's sessions (used by the dashboard driver selector).
+        # one driver's sessions (used by the dashboard driver selector);
+        # ?track=<calendar track key>&year=YYYY returns a calendar round's
+        # sessions (the track key is matched against the DB the same way the
+        # calendar coverage is built, so 'imola|enzo' finds any Imola race).
         limit = max(1, min(request.args.get('limit', default=50, type=int), 500))
         offset = max(0, request.args.get('offset', default=0, type=int))
         driver = request.args.get('driver', '').strip().upper()
+        track = request.args.get('track', '').strip()
+        year = request.args.get('year', type=int)
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
         base_sql = """
@@ -210,22 +217,33 @@ def get_sessions():
             LEFT JOIN drivers d ON s.driver_id = d.driver_id
             LEFT JOIN laps l ON s.session_id = l.session_id
         """
+        where = []
+        params = []
         if driver:
-            cursor.execute(base_sql + """
-                WHERE d.driver_code = %s
+            where.append('d.driver_code = %s')
+            params.append(driver)
+        if year:
+            where.append('YEAR(s.date) = %s')
+            params.append(year)
+        group_order = """
                 GROUP BY s.session_id, s.track_name, s.session_type, s.weather,
                          s.date, d.driver_code
                 ORDER BY s.date DESC, s.session_id DESC
-                LIMIT %s OFFSET %s
-            """, (driver, limit, offset))
+        """
+        where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+        if track:
+            # A calendar track key rarely equals the stored track_name, so the
+            # round's rows are pulled in full and matched in Python using the
+            # same substring rule race_calendar uses to draw the calendar.
+            cursor.execute(base_sql + where_sql + group_order, params)
+            matched = [s for s in cursor.fetchall()
+                       if race_calendar.match_track(str(s['track_name'] or ''),
+                                                    track)]
+            sessions = matched[offset:offset + limit]
         else:
-            cursor.execute(base_sql + """
-                GROUP BY s.session_id, s.track_name, s.session_type, s.weather,
-                         s.date, d.driver_code
-                ORDER BY s.date DESC, s.session_id DESC
-                LIMIT %s OFFSET %s
-            """, (limit, offset))
-        sessions = cursor.fetchall()
+            cursor.execute(base_sql + where_sql + group_order +
+                           ' LIMIT %s OFFSET %s', params + [limit, offset])
+            sessions = cursor.fetchall()
 
         for s in sessions:
             if s['date']:
@@ -1703,7 +1721,7 @@ def analyze_energy_modes():
                 "pace_basis": pace_basis,
                 "limited_effectiveness": LIMITED_LAP_PACE_EFFECTIVENESS,
                 "mode_notes": {
-                    "push": "asks the full deploy ceiling every lap; drains the store fast -> energy-limited laps (2026 has no fixed 4 MJ/lap quota)",
+                    "push": "asks the full deploy ceiling every lap; drains the store fast -> energy-limited laps (2026: no fixed per-lap deploy quota — store-limited bursts)",
                     "balanced": "spends ~ the lap's own harvest; SOC floats in a soft 30-80% band, draining below ~30% on faster-than-average laps and banking above ~80% on slower ones",
                     "liftcoast": "early lift-off recovers more (+20% harvest); banks the battery toward ~90% as insurance",
                 },
@@ -2333,6 +2351,583 @@ def compare_drivers_api():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+# ─────────────────────────────────────────────────────────────
+# P0 DUAL-AGENT OVERTAKE API (What If tab)
+#
+# The overtake models are loaded lazily on first request so the dashboard
+# starts fine even before scripts/ml_overtake_predictions.py has run; the
+# endpoints then return a clear "run the trainer" error (same pattern as the
+# lap predictor's "Model not loaded").
+# ─────────────────────────────────────────────────────────────
+_OVERTAKE_STATE = {"models": None, "info": None, "error": None}
+
+
+def _load_overtake():
+    """Lazily load (closing, overtake, feature_names), info, error."""
+    if _OVERTAKE_STATE["models"] is None and _OVERTAKE_STATE["error"] is None:
+        try:
+            closing, overtake, fnames, info = \
+                overtake_inference.load_overtake_models()
+            _OVERTAKE_STATE["models"] = (closing, overtake, fnames)
+            _OVERTAKE_STATE["info"] = info
+        except FileNotFoundError as exc:
+            _OVERTAKE_STATE["error"] = str(exc)
+    return (_OVERTAKE_STATE["models"], _OVERTAKE_STATE["info"],
+            _OVERTAKE_STATE["error"])
+
+
+@app.route('/api/overtake/options')
+def overtake_options():
+    """Drivers with pace models + tracks/tyres the overtake model covers."""
+    _models, info, err = _load_overtake()
+    drivers = []
+    for d in driver_comparison.list_driver_models():
+        drivers.append({
+            "code": d["code"], "name": d["name"],
+            "years": d.get("years", []), "tracks": d.get("tracks", []),
+            "mae": d.get("mae"),
+        })
+    tracks = (overtake_inference.covered_tracks(_models[2])
+              if _models else [])
+    payload = {
+        "drivers": drivers,
+        "tracks": tracks,
+        "tyres": ["Soft", "Medium", "Hard", "Intermediate", "Wet"],
+        "model_loaded": _models is not None,
+        "model_error": err,
+        "summary": None,
+    }
+    if info:
+        pc = info.get("pair_construction", {})
+        m = info.get("metrics", {})
+        payload["summary"] = {
+            "battle_laps": pc.get("battle_laps"),
+            "overtake_labels": pc.get("overtake_labels"),
+            "overtake_rate": pc.get("overtake_rate"),
+            "closing_mae": m.get("closing_rate", {}).get("mae"),
+            "overtake_auc": m.get("overtake", {}).get("auc"),
+            "trained_at": info.get("trained_at"),
+        }
+    resp = jsonify(payload)
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/api/calendar')
+def api_calendar():
+    """Race calendars 2020-2026 annotated with DB coverage.
+
+    No query params: returns every season's rounds (from
+    race_calendar.py, the single source of truth), each annotated with
+    what the database actually holds for that round — race session
+    counts, the DB circuit name(s) it matches, drivers present, best lap
+    and max lap — so
+    the dashboard calendar doubles as a data-coverage map for the
+    overtake tooling.  ?year=YYYY narrows the response to one season.
+    """
+    year = request.args.get('year', type=int)
+    conn = None
+    try:
+        conn = get_db_connection()
+        try:
+            if year:
+                calendars = {year: race_calendar.annotate_with_db(year, conn=conn)}
+            else:
+                calendars = {y: race_calendar.annotate_with_db(y, conn=conn)
+                             for y in race_calendar.YEARS}
+        finally:
+            conn.close()
+        payload = {"years": race_calendar.YEARS, "calendars": calendars}
+        resp = jsonify(payload)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/overtake/sessions')
+def overtake_sessions():
+    """Resolve the two drivers' race sessions for a track/season.
+
+    ?leader=CODE&chaser=CODE&track=&year= returns the best (most timed
+    laps, latest date) per-driver race session on that track/season — the
+    pair the P1 full-race simulator runs on.  Same selection rule as the
+    driver-comparison API (_sessions_on_track).
+    """
+    leader = request.args.get('leader', '').strip().upper()
+    chaser = request.args.get('chaser', '').strip().upper()
+    track = request.args.get('track', '').strip()
+    year = request.args.get('year', type=int)
+    if not leader or not chaser or not track or not year:
+        return jsonify({"error": "leader, chaser, track and year query params required"}), 400
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        best = _sessions_on_track(cursor, year, track)
+        out = {}
+        missing = []
+        for code in (leader, chaser):
+            row = best.get(code)
+            if row is None:
+                missing.append(code)
+                continue
+            cursor.execute("""
+                SELECT MAX(l.lap_number) AS max_lap, COUNT(l.lap_id) AS laps
+                FROM laps l
+                WHERE l.session_id = %s AND l.lap_time_ms > 0
+            """, (row['session_id'],))
+            span = cursor.fetchone()
+            out[code] = {
+                "code": code,
+                "name": row['driver_name'],
+                "session_id": row['session_id'],
+                "date": row['date'].strftime('%Y-%m-%d') if row['date'] else None,
+                "laps": row['laps'],
+                "max_lap": span['max_lap'],
+            }
+        payload = {"track": track, "year": year, "sessions": out}
+        if missing:
+            payload["missing"] = missing
+        resp = jsonify(payload)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if cursor:
+            try: cursor.close()
+            except: pass
+        if conn:
+            try: conn.close()
+            except: pass
+
+
+# Season-scan cache: (leader_code, chaser_code, year) -> calibration payload.
+# A full scan is ~2-3s per race (light sim runs, models cached in-process),
+# so cache per pair/season and only rebuild when the model or data changes.
+_CALIBRATION_CACHE = {}
+
+
+@app.route('/api/overtake/calibration')
+def overtake_calibration():
+    """Season-wide model-vs-reality calibration for a driver pair.
+
+    ?leader=CODE&chaser=CODE&year=YYYY scans every track where BOTH drivers
+    have a race session that season.  For each race, the P0 closing-rate
+    model's per-lap predictions are regressed against the two drivers'
+    REAL lap-time deltas (calibration_stats in overtake_inference):
+    agreement %, sign-flip laps, OLS slope/R^2 and a trust tier — so the
+    projected leaderboard can say which races it is trustworthy on.  Races
+    where the model's NET direction contradicts the real deltas are
+    flagged.  Results are cached per (leader, chaser, year).
+    """
+    leader = request.args.get('leader', '').strip().upper()
+    chaser = request.args.get('chaser', '').strip().upper()
+    year = request.args.get('year', type=int)
+    if not leader or not chaser or not year:
+        return jsonify({"error": "leader, chaser and year query params required"}), 400
+    if leader == chaser:
+        return jsonify({"error": "leader and chaser must differ"}), 400
+    key = (leader, chaser, year)
+    cached = _CALIBRATION_CACHE.get(key)
+    if cached is not None:
+        return jsonify(cached)
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT DISTINCT s.track_name
+            FROM sessions s
+            JOIN drivers d ON s.driver_id = d.driver_id
+            JOIN laps l ON l.session_id = s.session_id AND l.lap_time_ms > 0
+            WHERE YEAR(s.date) = %s AND d.driver_code IN (%s, %s)
+              AND s.track_name IS NOT NULL
+            ORDER BY s.track_name
+        """, (year, leader, chaser))
+        tracks = [r['track_name'] for r in cursor.fetchall()]
+        races = []
+        for track in tracks:
+            best = _sessions_on_track(cursor, year, track)
+            l_row = best.get(leader)
+            c_row = best.get(chaser)
+            if l_row is None or c_row is None:
+                continue
+            try:
+                cal = overtake_inference.calibrate_race(
+                    leader_session_id=l_row['session_id'],
+                    chaser_session_id=c_row['session_id'],
+                )
+            except Exception as exc:
+                # Expected for rounds where a driver has no timed laps (e.g.
+                # DNS / early DNF sessions are kept in the DB): report the
+                # round as an error row rather than a stack-trace flood.
+                print(f"[calibration] {track} {year}: {leader}/{chaser} skipped "
+                      f"- {exc}")
+                cal = {"error": str(exc)}
+            races.append({
+                "track": track,
+                "date": (l_row['date'].strftime('%Y-%m-%d')
+                          if l_row['date'] else None),
+                "leader_session_id": l_row['session_id'],
+                "chaser_session_id": c_row['session_id'],
+                **cal,
+            })
+        tiers = {}
+        flagged = []
+        for race in races:
+            t = race.get('trust', 'insufficient')
+            tiers[t] = tiers.get(t, 0) + 1
+            if t == 'low' or (t == 'medium' and not race.get('net_direction_ok', True)):
+                flagged.append({
+                    "track": race['track'],
+                    "trust": t,
+                    "flips": race.get('sign_flips', 0),
+                    "net_direction_ok": race.get('net_direction_ok', True),
+                })
+        payload = {
+            "leader": leader,
+            "chaser": chaser,
+            "year": year,
+            "races": races,
+            "trust_counts": tiers,
+            "flagged_races": flagged,
+        }
+        _CALIBRATION_CACHE[key] = payload
+        resp = jsonify(payload)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if cursor:
+            try: cursor.close()
+            except: pass
+        if conn:
+            try: conn.close()
+            except: pass
+
+
+@app.route('/api/overtake/sim', methods=['POST'])
+def overtake_sim():
+    """Predict one leader/chaser lap (or a short battle) with the P0 model.
+
+    Body fields: leader_code, chaser_code, track_name, lap_number,
+    gap_before_s, leader_tyre_compound, chaser_tyre_compound,
+    leader_tyre_age, chaser_tyre_age, fuel_diff_kg, energy_diff_mj,
+    year (optional), sim_laps (optional, >1 runs a lap-by-lap battle).
+
+    With full_race=true the P1 simulator runs instead: leader_session_id /
+    chaser_session_id, start_lap, gap_before_s, end_lap (optional),
+    max_laps (optional) — a whole-race, speed-trace-aligned progression
+    with sector-level Overtake % (see overtake_inference.simulate_full_race).
+    """
+    _models, _info, err = _load_overtake()
+    if _models is None:
+        return jsonify({"error": err or "Overtake model not loaded"}), 500
+    try:
+        body = request.get_json()
+        if body.get('full_race'):
+            return _overtake_full_race(body)
+        required = ["leader_code", "chaser_code", "track_name",
+                    "lap_number", "gap_before_s", "leader_tyre_compound",
+                    "chaser_tyre_compound", "leader_tyre_age",
+                    "chaser_tyre_age"]
+        for f in required:
+            if body.get(f) in (None, ""):
+                return jsonify({"error": f"Missing field: {f}"}), 400
+
+        leader_code = str(body["leader_code"]).strip().upper()
+        chaser_code = str(body["chaser_code"]).strip().upper()
+        if leader_code == chaser_code:
+            return jsonify({"error": "Pick two different drivers."}), 400
+        track_name = str(body["track_name"]).strip()
+        lap_number = int(body["lap_number"])
+        gap_before = float(body["gap_before_s"])
+        leader_tyre = str(body["leader_tyre_compound"]).strip()
+        chaser_tyre = str(body["chaser_tyre_compound"]).strip()
+        leader_age = float(body["leader_tyre_age"])
+        chaser_age = float(body["chaser_tyre_age"])
+        fuel_diff = float(body.get("fuel_diff_kg") or 0.0)
+        energy_diff = float(body.get("energy_diff_mj") or 0.0)
+        year_raw = body.get("year")
+        year = int(year_raw) if year_raw not in (None, "") else None
+        sim_laps = int(body.get("sim_laps") or 1)
+
+        if gap_before <= 0:
+            return jsonify({"error": "gap_before_s must be > 0"}), 400
+        if sim_laps < 1 or sim_laps > 60:
+            return jsonify({"error": "sim_laps must be 1..60"}), 400
+
+        pace_gap, pace_detail = overtake_inference.compute_pace_gap(
+            leader_code=leader_code, chaser_code=chaser_code,
+            track_name=track_name, lap_number=lap_number,
+            leader_tyre_compound=leader_tyre,
+            chaser_tyre_compound=chaser_tyre,
+            leader_tyre_age=leader_age, chaser_tyre_age=chaser_age,
+            year=year,
+        )
+        if pace_gap is None:
+            return jsonify({"error": str(pace_detail)}), 400
+
+        result = overtake_inference.predict_overtake(
+            gap_before_s=gap_before, pace_gap_s=pace_gap,
+            chaser_tyre_age=chaser_age, leader_tyre_age=leader_age,
+            chaser_tyre_compound=chaser_tyre,
+            leader_tyre_compound=leader_tyre,
+            fuel_diff_kg=fuel_diff, energy_diff_mj=energy_diff,
+            lap_number=lap_number, track_name=track_name, year=year,
+        )
+
+        # Short battle simulation: gap progression + pass detection.
+        sim = None
+        if sim_laps > 1:
+            sim = _simulate_battle(
+                leader_code=leader_code, chaser_code=chaser_code,
+                track_name=track_name, lap_number=lap_number,
+                leader_tyre=leader_tyre, chaser_tyre=chaser_tyre,
+                leader_age=leader_age, chaser_age=chaser_age,
+                gap_before=gap_before, fuel_diff=fuel_diff,
+                energy_diff=energy_diff, year=year, sim_laps=sim_laps,
+            )
+
+        resp = jsonify({
+            "pace_gap_s": pace_gap,
+            "pace_gap_detail": pace_detail,
+            "single": result,
+            "sim": sim,
+        })
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except KeyError as e:
+        return jsonify({"error": f"Missing field: {e}"}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/overtake/live', methods=['POST'])
+def overtake_live():
+    """Live race-call projection: two drivers' AGGREGATE career pace models
+    walk the race forward from the CURRENT tyre state (no stored session
+    replay — usable mid-race).
+
+    Body fields: leader_code, chaser_code, track_name, start_lap (current
+    lap), race_length (total laps), gap_before_s, leader_tyre_compound /
+    leader_tyre_age, chaser_tyre_compound / chaser_tyre_age, year
+    (optional — era level only, never picks a per-year model).  See
+    overtake_inference.simulate_live_call for the mechanics.
+    """
+    _models, _info, err = _load_overtake()
+    if _models is None:
+        return jsonify({"error": err or "Overtake model not loaded"}), 500
+    try:
+        body = request.get_json() or {}
+        leader = str(body.get('leader_code') or '').strip().upper()
+        chaser = str(body.get('chaser_code') or '').strip().upper()
+        track = str(body.get('track_name') or '').strip()
+        if not leader or not chaser or not track:
+            return jsonify({"error": "leader_code, chaser_code and "
+                                      "track_name required"}), 400
+        if leader == chaser:
+            return jsonify({"error": "Pick two different drivers."}), 400
+        year_raw = body.get('year')
+        year = int(year_raw) if year_raw not in (None, "") else None
+        ers_raw = body.get('chaser_ers')
+        chaser_ers = None if ers_raw in (None, "") else float(ers_raw)
+        ers_deltas_raw = body.get('chaser_ers_deltas')
+        chaser_ers_deltas = None
+        if ers_deltas_raw not in (None, "", []):
+            chaser_ers_deltas = [float(x) for x in ers_deltas_raw]
+        batt_raw = body.get('chaser_battery_pct')
+        chaser_battery_pct = (float(batt_raw)
+                              if batt_raw not in (None, "") else None)
+
+        result = overtake_inference.simulate_live_call(
+            leader_code=leader,
+            chaser_code=chaser,
+            track_name=track,
+            start_lap=int(body.get('start_lap') or 1),
+            race_length=int(body.get('race_length') or 57),
+            gap_before_s=float(body.get('gap_before_s') or 0.8),
+            leader_tyre_compound=body.get('leader_tyre_compound')
+                                 or 'Medium',
+            chaser_tyre_compound=body.get('chaser_tyre_compound')
+                                 or 'Medium',
+            leader_tyre_age=float(body.get('leader_tyre_age') or 0.0),
+            chaser_tyre_age=float(body.get('chaser_tyre_age') or 0.0),
+            year=year,
+            chaser_ers=chaser_ers,
+            chaser_ers_deltas=chaser_ers_deltas,
+            chaser_battery_pct=chaser_battery_pct,
+        )
+        resp = jsonify({"live": result})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+OVERTAKE_TRIGGER_PROB = 0.5   # pass fires when per-lap probability crosses this
+BATTLE_END_GAP_S = 10.0       # battle considered over beyond this gap
+
+
+def _overtake_full_race(body):
+    """P1 full-race branch of /api/overtake/sim.
+
+    Runs overtake_inference.simulate_full_race over the two drivers' real
+    race sessions and returns the per-lap, sector-level payload.  Reads
+    every P0 feature from the database (tyre / fuel / energy from
+    race_state), so the energy_diff term is real whenever the energy
+    simulator has run for those sessions.
+    """
+    try:
+        leader_session_id = int(body.get('leader_session_id') or 0)
+        chaser_session_id = int(body.get('chaser_session_id') or 0)
+        if leader_session_id <= 0 or chaser_session_id <= 0:
+            return jsonify({"error": "full_race needs leader_session_id and "
+                                      "chaser_session_id (per-driver race "
+                                      "sessions on the same track)"}), 400
+        if leader_session_id == chaser_session_id:
+            return jsonify({"error": "Leader and chaser must be different sessions."}), 400
+
+        start_lap = int(body.get('start_lap') or 1)
+        gap = float(body.get('gap_before_s') or 0.0)
+        if gap <= 0:
+            return jsonify({"error": "gap_before_s must be > 0"}), 400
+        end_lap = body.get('end_lap')
+        end_lap = int(end_lap) if end_lap not in (None, '') else None
+        max_laps = min(120, max(1, int(body.get('max_laps') or 80)))
+
+        # Optional ERS-mode head-to-head: each requested mode re-scores the
+        # race with that mode's projected energy trace (only energy_diff_mj
+        # changes), so the dashboard can show how the deployment choice
+        # shifts the corner pass probabilities.
+        modes_raw = body.get('modes')
+        modes = None
+        if modes_raw:
+            modes = [str(m).lower() for m in modes_raw]
+            unknown = [m for m in modes if m not in MODES]
+            if unknown:
+                return jsonify({"error": f"Unknown energy mode(s) "
+                                          f"{unknown} — use one of {sorted(MODES)}"}), 400
+
+        # Optional ASYMMETRIC ERS duels: a (leader_spec, chaser_spec) list
+        # where each spec is an energy-simulator mode or 'stored' (that
+        # driver's real race_state trace).  Runs the race once more per pair
+        # with the two cars on different deployments, so the output answers
+        # e.g. "when does the overtake happen if the leader defends on
+        # Balanced while the chaser attacks on Push".
+        ERS_SPECS = set(MODES) | {'stored'}
+        mode_pairs_raw = body.get('mode_pairs')
+        mode_pairs = None
+        if mode_pairs_raw:
+            mode_pairs = []
+            for mp in mode_pairs_raw:
+                if isinstance(mp, dict):
+                    lm, cm = mp.get('leader_mode'), mp.get('chaser_mode')
+                else:
+                    lm, cm = mp[0], mp[1]
+                lm, cm = str(lm).lower(), str(cm).lower()
+                if lm not in ERS_SPECS or cm not in ERS_SPECS:
+                    return jsonify({"error": f"Unknown ERS spec in mode pair "
+                                              f"({lm}, {cm}) — each side must be "
+                                              f"one of {sorted(ERS_SPECS)}"}), 400
+                mode_pairs.append((lm, cm))
+
+        result = overtake_inference.simulate_full_race(
+            leader_session_id=leader_session_id,
+            chaser_session_id=chaser_session_id,
+            start_lap=max(1, start_lap),
+            gap_before_s=gap,
+            end_lap=end_lap,
+            max_laps=max_laps,
+            trigger_prob=OVERTAKE_TRIGGER_PROB,
+            modes=modes,
+            mode_pairs=mode_pairs,
+        )
+        resp = jsonify({"full_race": result})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+def _simulate_battle(leader_code, chaser_code, track_name, lap_number,
+                     leader_tyre, chaser_tyre, leader_age, chaser_age,
+                     gap_before, fuel_diff, energy_diff, year, sim_laps):
+    """Lap-by-lap gap progression: closing rate shrinks the gap, a per-lap
+    probability crossing OVERTAKE_TRIGGER_PROB swaps the roles.
+
+    After a swap the (new) chaser's and leader's tyre contexts are exchanged
+    and the gap resets small, keeping the progression physical (no negative
+    gaps, no pass-and-teleport).
+    """
+    gap = float(gap_before)
+    l_code, c_code = leader_code, chaser_code
+    l_tyre, c_tyre = leader_tyre, chaser_tyre
+    l_age, c_age = float(leader_age), float(chaser_age)
+    laps_out = []
+    pass_lap = None
+    i = 0
+    while i < sim_laps and gap <= BATTLE_END_GAP_S:
+        i += 1
+        L = lap_number + i - 1
+        pg, _d = overtake_inference.compute_pace_gap(
+            leader_code=l_code, chaser_code=c_code, track_name=track_name,
+            lap_number=L, leader_tyre_compound=l_tyre,
+            chaser_tyre_compound=c_tyre, leader_tyre_age=l_age,
+            chaser_tyre_age=c_age, year=year,
+        )
+        if pg is None:
+            break
+        res = overtake_inference.predict_overtake(
+            gap_before_s=gap, pace_gap_s=pg,
+            chaser_tyre_age=c_age, leader_tyre_age=l_age,
+            chaser_tyre_compound=c_tyre, leader_tyre_compound=l_tyre,
+            fuel_diff_kg=fuel_diff, energy_diff_mj=energy_diff,
+            lap_number=L, track_name=track_name, year=year,
+        )
+        prob = res["overtake_probability"]
+        closing = res["closing_rate_s"]
+        passed = prob >= OVERTAKE_TRIGGER_PROB
+        laps_out.append({
+            "lap": L, "gap_before_s": round(gap, 2),
+            "closing_rate_s": round(closing, 3),
+            "overtake_probability": prob, "passed": passed,
+        })
+        if passed:
+            pass_lap = L
+            # Roles swap: the chaser is now ahead by a small margin.
+            gap = max(0.3, gap * 0.35)
+            l_code, c_code = c_code, l_code
+            l_tyre, c_tyre = c_tyre, l_tyre
+            l_age, c_age = c_age, l_age
+        else:
+            gap = max(0.05, gap - closing)
+        l_age += 1
+        c_age += 1
+    return {
+        "laps": laps_out, "pass_lap": pass_lap,
+        "simulated_laps": len(laps_out),
+        "ended": "pass" if pass_lap else ("blown_open" if gap > BATTLE_END_GAP_S else "ran_out"),
+        "final_gap_s": round(gap, 2),
+    }
 
 
 def clickable(url, text=None):
