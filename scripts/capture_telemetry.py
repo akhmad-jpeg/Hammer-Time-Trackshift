@@ -490,6 +490,7 @@ def db_worker(db_queue: queue.Queue, stop_event: threading.Event,
     ('update_lap_time', lap_id, lap_time_ms, is_valid)
     ('insert_telemetry',lap_id, speed, throttle, brake, gear, rpm, drs)
     ('insert_strategy_event', lap_id, event_type, duration_sec)
+    ('resolve_driver',    driver_code, res_holder)
     """
     conn = None
     try:
@@ -512,7 +513,27 @@ def db_worker(db_queue: queue.Queue, stop_event: threading.Event,
 
             action = task[0]
 
-            if action == "insert_session":
+            if action == "resolve_driver":
+                # Map a 3-letter driver code to its drivers row (creating the
+                # row when unseen) so a capture can be attributed to a real
+                # driver instead of the Player sentinel.
+                _, code, res_holder = task
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT driver_id FROM drivers WHERE driver_code = %s",
+                    (code,))
+                row = cur.fetchone()
+                if row:
+                    res_holder["driver_id"] = int(row[0])
+                else:
+                    cur.execute(
+                        "INSERT INTO drivers (driver_code, driver_name) "
+                        "VALUES (%s, %s)",
+                        (code, code))
+                    conn.commit()
+                    res_holder["driver_id"] = int(cur.lastrowid)
+                cur.close()
+            elif action == "insert_session":
                 _, session_type, weather, driver_id, res_holder = task
                 res_holder["session_id"] = insert_session(
                     conn, track_id, canonical_track,
@@ -731,6 +752,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ip",   type=str, default=UDP_IP,   help="UDP listen IP")
     parser.add_argument("--port", type=int, default=UDP_PORT, help="UDP listen port")
     parser.add_argument(
+        "--driver-code",
+        type=str,
+        default=None,
+        help="Attribute the capture to a REAL driver (3-letter code, e.g. HAM "
+             "or VER) instead of the 'PLY' Player sentinel — lets a second "
+             "capture instance on another --port record the other car of a "
+             "battle, so the live feed can drive the two-car Race Call.",
+    )
+    parser.add_argument(
         "--heartbeat",
         type=float,
         default=HEARTBEAT_INTERVAL_S,
@@ -765,7 +795,12 @@ def main() -> None:
     print(f"  Track       : {raw_track_name}")
     print(f"  Tyre        : {starting_tyre}")
     print(f"  Weather     : {weather_label}")
-    print(f"  Driver ID   : {GAME_DRIVER_ID}  (Player sentinel)")
+    capture_driver_id = GAME_DRIVER_ID
+    if args.driver_code:
+        capture_code = args.driver_code.strip().upper()[:3]
+        print(f"  Driver      : {capture_code} (resolving...)")
+    else:
+        print(f"  Driver ID   : {GAME_DRIVER_ID}  (Player sentinel)")
     if args.heartbeat > 0:
         print(f"  Heartbeat   : every {args.heartbeat:g}s")
     else:
@@ -786,6 +821,16 @@ def main() -> None:
         daemon=True,
     )
     worker.start()
+
+    # Attribute the capture to a real driver (after the DB worker is up —
+    # the lookup itself is a DB task on the same queue).
+    if args.driver_code:
+        drv_res: dict = {}
+        db_queue.put(("resolve_driver", capture_code, drv_res))
+        _wait_for_result(drv_res, worker, worker_error, "driver resolution")
+        capture_driver_id = drv_res["driver_id"]
+        print(f"[DB] Capturing as driver '{capture_code}' "
+              f"(driver_id={capture_driver_id})")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.ip, args.port))
@@ -895,7 +940,7 @@ def main() -> None:
                 ses_res: dict = {}
                 db_queue.put((
                     "insert_session",
-                    "Race", weather_label, GAME_DRIVER_ID,
+                    "Race", weather_label, capture_driver_id,
                     ses_res,
                 ))
                 _wait_for_result(ses_res, worker, worker_error,
@@ -915,12 +960,12 @@ def main() -> None:
                     current_session_id, last_lap_number, 0,
                     current_tyre_compound, tyre_age,
                     estimate_fuel_load(last_lap_number),
-                    False, GAME_DRIVER_ID, lap_res,
+                    False, capture_driver_id, lap_res,
                 ))
                 _wait_for_result(lap_res, worker, worker_error,
                                  "lap 1 creation")
                 current_lap_id = lap_res["lap_id"]
-                print(f"[LAP START] Lap 1 in progress... (driver_id={GAME_DRIVER_ID})")
+                print(f"[LAP START] Lap 1 in progress... (driver_id={capture_driver_id})")
 
             # ----------------------------------------------------------------
             # Track lap timer
@@ -1020,7 +1065,7 @@ def main() -> None:
                     current_session_id, last_lap_number, 0,
                     current_tyre_compound, tyre_age,
                     estimate_fuel_load(last_lap_number),
-                    False, GAME_DRIVER_ID, next_lap_res,
+                    False, capture_driver_id, next_lap_res,
                 ))
                 _wait_for_result(next_lap_res, worker, worker_error,
                                  f"lap {last_lap_number} creation")

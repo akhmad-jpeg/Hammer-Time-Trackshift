@@ -280,6 +280,311 @@ ENERGY_DIFF_CLIP_MIN = -2.0
 ENERGY_DIFF_CLIP_MAX = 0.6
 
 
+# Used when a pit lap's own-time estimate is unavailable (missing neighbour
+# laps): a typical mid-field pit delta at racing pace.
+PIT_LOSS_FALLBACK_S = 20.0
+
+
+def _pit_stops_from_laps(session_id, conn):
+    """Derive pit stops from the laps table (fallback: tyre_stints empty).
+
+    A stop is a lap whose tyre_age resets vs the previous lap or whose
+    compound changes — in this dataset the PIT LAP ITSELF carries the NEW
+    compound (age 1/low age) and its lap time includes the pit-lane
+    transit (the slow-pit-lap spike, e.g. 115s vs a ~95s baseline).
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT lap_number, lap_time_ms, tyre_compound, tyre_age
+            FROM laps WHERE session_id = %s AND lap_time_ms > 0
+            ORDER BY lap_number
+        """, (session_id,))
+        laps = cur.fetchall()
+    finally:
+        cur.close()
+    if len(laps) < 5:
+        return {}
+    resets = []
+    for i in range(1, len(laps)):
+        prev, nxt = laps[i - 1], laps[i]
+        compound_changed = (
+            prev['tyre_compound'] and nxt['tyre_compound']
+            and str(prev['tyre_compound']).strip()
+                != str(nxt['tyre_compound']).strip())
+        age_reset = (
+            prev['tyre_age'] is not None and nxt['tyre_age'] is not None
+            and float(nxt['tyre_age']) < float(prev['tyre_age']))
+        if compound_changed or age_reset:
+            resets.append(nxt)
+    if not resets:
+        return {}
+    pit_laps = {int(r['lap_number']) for r in resets}
+    times = {int(r['lap_number']): float(r['lap_time_ms']) / 1000.0
+             for r in laps}
+    stops = {}
+    for r in resets:
+        L = int(r['lap_number'])
+        lt = times[L]
+        ref = [times[n] for n in range(L - 2, L + 3)
+               if n in times and n != L and n not in pit_laps]
+        loss = round(lt - (sum(ref) / len(ref)), 2) if ref else None
+        stops[L] = {
+            "compound": (str(r['tyre_compound']).strip()
+                          if r['tyre_compound'] else None),
+            "pit_loss_s": loss if (loss is not None and loss > 0) else None,
+        }
+    return stops
+
+
+def _load_pit_stops(session_id, conn):
+    """Pit stops for one session, from tyre_stints (preferred) or laps.
+
+    Returns {lap_number: {'compound', 'stint_number'?, 'pit_loss_s'}}.
+    ``pit_loss_s`` estimates the total time lost that lap: the pit lap's
+    own time minus the mean of the driver's neighbouring "green" laps
+    (up to 2 either side, other pit laps excluded) — the standard
+    slow-pit-lap delta.  None when there is not enough neighbouring
+    timing to estimate it (the caller then falls back to
+    PIT_LOSS_FALLBACK_S).
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT stint_number, start_lap, tyre_compound
+            FROM tyre_stints
+            WHERE session_id = %s AND stint_number > 1 AND start_lap > 1
+            ORDER BY start_lap
+        """, (session_id,))
+        stints = cur.fetchall()
+    finally:
+        cur.close()
+    if not stints:
+        # tyre_stints is not populated for this session (the historical
+        # importer never fills it) — derive the stops from the laps table's
+        # tyre-age resets / compound changes instead.
+        return _pit_stops_from_laps(session_id, conn)
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT lap_number, lap_time_ms FROM laps
+            WHERE session_id = %s AND lap_time_ms > 0
+            ORDER BY lap_number
+        """, (session_id,))
+        times = {int(r['lap_number']): float(r['lap_time_ms']) / 1000.0
+                 for r in cur.fetchall()}
+    finally:
+        cur.close()
+    pit_laps = {int(s['start_lap']) for s in stints}
+    stops = {}
+    for st in stints:
+        L = int(st['start_lap'])
+        lt = times.get(L)
+        if lt is None:
+            continue
+        ref = [times[n] for n in range(L - 2, L + 3)
+               if n in times and n != L and n not in pit_laps]
+        loss = round(lt - (sum(ref) / len(ref)), 2) if ref else None
+        stops[L] = {
+            "compound": (str(st['tyre_compound']).strip()
+                          if st['tyre_compound'] else None),
+            "stint_number": int(st['stint_number']),
+            "pit_loss_s": loss if (loss is not None and loss > 0) else None,
+        }
+    return stops
+
+
+def _fill_tyres_from_stints(laps_by_lap, session_id, conn):
+    """Fill missing tyre compound/age from the session's tyre_stints.
+
+    Pit laps and the first lap after a stop frequently miss compound/age
+    in the laps table, which made the replay skip exactly those laps.
+    The stint table (start_lap, compound, starting_tyre_age) fills them.
+    Returns the number of laps fixed.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT start_lap, end_lap, tyre_compound, starting_tyre_age
+            FROM tyre_stints WHERE session_id = %s
+            ORDER BY start_lap
+        """, (session_id,))
+        stints = cur.fetchall()
+    finally:
+        cur.close()
+    if not stints:
+        return 0
+    filled = 0
+    for lap in laps_by_lap.values():
+        L = int(lap['lap_number'])
+        if lap.get('tyre_compound'):
+            continue
+        for st in stints:
+            s_start = int(st['start_lap'])
+            s_end = int(st['end_lap']) if st['end_lap'] is not None else None
+            if L >= s_start and (s_end is None or L <= s_end):
+                lap['tyre_compound'] = str(st['tyre_compound']).strip()
+                base = (float(st['starting_tyre_age'])
+                        if st['starting_tyre_age'] is not None else 0.0)
+                lap['tyre_age'] = float(base + (L - s_start))
+                filled += 1
+                break
+    return filled
+
+
+def _detect_neutralisations(laps):
+    """Detect SC / VSC windows from a session's own lap times.
+
+    A neutralisation is a run of >= 2 consecutive laps materially slower
+    than the session's racing baseline (median of valid laps).  A pit stop
+    is a ONE-lap spike, a neutralisation is sustained — that's the
+    discriminator.  Classification: mean slowdown >= 25% of baseline
+    (or >= 30 s) -> SafetyCar, else VSC.  Returns windows:
+    [{'start_lap', 'end_lap', 'type', 'duration_s', 'lap_ids'}].
+    """
+    valid = sorted((int(l['lap_number']), float(l['lap_time_s']),
+                    l.get('lap_id'))
+                   for l in laps
+                   if l.get('lap_time_s') and l.get('is_valid', True))
+    if len(valid) < 6:
+        return []
+    baseline = sorted(t for _, t, _ in valid)[len(valid) // 2]
+    threshold = baseline + max(12.0, baseline * 0.10)
+    slow = {n: t for n, t, _ in valid if t > threshold}
+    windows, run, prev = [], [], None
+    for n in sorted(slow):
+        if prev is not None and n == prev + 1:
+            run.append(n)
+        else:
+            if len(run) >= 2:
+                windows.append(run)
+            run = [n]
+        prev = n
+    if len(run) >= 2:
+        windows.append(run)
+    out = []
+    for run_laps in windows:
+        slowdown = [slow[n] - baseline for n in run_laps]
+        mean_slow = sum(slowdown) / len(slowdown)
+        ntype = ('SafetyCar'
+                 if (mean_slow >= 0.25 * baseline or mean_slow >= 30.0)
+                 else 'VSC')
+        out.append({
+            "start_lap": run_laps[0],
+            "end_lap": run_laps[-1],
+            "type": ntype,
+            "duration_s": round(sum(slowdown), 1),
+            "lap_ids": [lid for n, t, lid in valid if n in run_laps
+                        and lid is not None],
+        })
+    return out
+
+
+def _persist_neutralisations(session_id, conn, windows, laps_by_lap):
+    """Write detected neutralisations into strategy_events (idempotent).
+
+    Each window becomes one event anchored on its FIRST lap's lap_id
+    (the same convention cleanup_pit_events.py uses for PitStop rows);
+    an event is only inserted when that lap_id+type combination does not
+    exist yet, so re-running never duplicates rows.  Returns rows added.
+    """
+    added = 0
+    cur = conn.cursor()
+    try:
+        for w in windows:
+            start_lap = w.get("start_lap")
+            lap = laps_by_lap.get(start_lap)
+            lap_id = lap.get('lap_id') if lap else None
+            if lap_id is None:
+                continue
+            cur.execute(
+                "SELECT 1 FROM strategy_events "
+                "WHERE lap_id = %s AND event_type = %s LIMIT 1",
+                (lap_id, w["type"]))
+            if cur.fetchone():
+                continue
+            cur.execute(
+                "INSERT INTO strategy_events (lap_id, event_type, duration_sec) "
+                "VALUES (%s, %s, %s)",
+                (lap_id, w["type"], w.get("duration_s")))
+            added += 1
+        if added:
+            conn.commit()
+    finally:
+        cur.close()
+    return added
+
+
+def _load_neutralisations(session_id, conn, laps_by_lap=None):
+    """Neutralisation windows for one session.
+
+    strategy_events rows anchored to this session's laps (via lap_id) win.
+    When the table has none for the session, windows are detected from the
+    lap times and PERSISTED back into strategy_events, so the table becomes
+    the source of truth for every later run.  Returns
+    (by_lap, windows): by_lap maps each covered lap number to
+    {'type', 'window': (start, end)}; windows is the summary list.
+    """
+    cur = conn.cursor(dictionary=True)
+    try:
+        cur.execute("""
+            SELECT e.event_type, e.duration_sec, l.lap_number
+            FROM strategy_events e
+            JOIN laps l ON e.lap_id = l.lap_id
+            WHERE l.session_id = %s
+              AND e.event_type IN ('SafetyCar', 'VSC', 'RedFlag')
+            ORDER BY l.lap_number
+        """, (session_id,))
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+
+    windows = []
+    if rows:
+        # The event anchors the START lap; extend the window over the
+        # session's consecutive slow laps (duration_sec is the summed
+        # slowdown, which can be less than one racing lap at VSC pace, so
+        # it can't be used as a lap-count estimate on its own).
+        lap_times = [float(l['lap_time_s']) for l in (laps_by_lap or {}).values()
+                     if l.get('lap_time_s') and l.get('is_valid', True)]
+        baseline = (sorted(lap_times)[len(lap_times) // 2]
+                    if lap_times else 0.0)
+        threshold = baseline + max(12.0, baseline * 0.10) if baseline > 0 else None
+        slow_laps = ({int(l['lap_number'])
+                      for l in (laps_by_lap or {}).values()
+                      if l.get('lap_time_s') and l.get('is_valid', True)
+                      and float(l['lap_time_s']) > threshold}
+                     if threshold else set())
+        for r in rows:
+            start = int(r['lap_number'])
+            end = start
+            while (end + 1) in slow_laps:
+                end += 1
+            dur = float(r['duration_sec']) if r['duration_sec'] else 0.0
+            windows.append({"start_lap": start, "end_lap": end,
+                            "type": r['event_type'], "duration_s": dur,
+                            "source": "strategy_events"})
+    else:
+        detected = _detect_neutralisations(list((laps_by_lap or {}).values()))
+        if detected:
+            _persist_neutralisations(session_id, conn, detected, laps_by_lap)
+        for w in detected:
+            windows.append({"start_lap": w["start_lap"],
+                            "end_lap": w["end_lap"], "type": w["type"],
+                            "duration_s": w["duration_s"],
+                            "source": "detected from lap times"})
+
+    by_lap = {}
+    for w in windows:
+        for L in range(int(w["start_lap"]), int(w["end_lap"]) + 1):
+            cur_type = (by_lap.get(L) or {}).get("type")
+            severity = {'VSC': 1, 'SafetyCar': 2, 'RedFlag': 3}
+            if cur_type is None or severity.get(w["type"], 0) > severity.get(cur_type, 0):
+                by_lap[L] = {"type": w["type"],
+                             "window": (int(w["start_lap"]), int(w["end_lap"]))}
+    return by_lap, windows
+
+
 def load_session_race_laps(session_id, conn=None):
     """Per-lap race context for one driver session.
 
@@ -755,10 +1060,40 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
         if not leader_laps or not chaser_laps:
             raise ValueError("One of the sessions has no timed laps.")
 
+        # Real pit stops (tyre_stints): the pitting driver loses the
+        # pit-lane delta that lap, so the pair's projected gap jumps at
+        # every one-sided stop — and missing tyre context around stops is
+        # back-filled from the stint table so those laps score instead of
+        # being skipped.  Stops follow the DRIVER (roles may swap mid-race).
+        leader_pits = _load_pit_stops(int(leader_session_id), conn)
+        chaser_pits = _load_pit_stops(int(chaser_session_id), conn)
+        _fill_tyres_from_stints(leader_laps, int(leader_session_id), conn)
+        _fill_tyres_from_stints(chaser_laps, int(chaser_session_id), conn)
+
+        # Neutralisations (SC / VSC / RedFlag): strategy_events rows anchored
+        # to these sessions' laps; when the table has none, windows are
+        # detected from the lap times and persisted back into the table
+        # (idempotent).  Merged across both cars' sessions — they share the
+        # race — with the most severe type winning per lap.
+        neutral_by_lap = {}
+        neutral_windows = []
+        for sid, laps_map in ((leader_session_id, leader_laps),
+                              (chaser_session_id, chaser_laps)):
+            by_lap, wins = _load_neutralisations(int(sid), conn, laps_map)
+            neutral_windows.extend(wins)
+            for nl, info in by_lap.items():
+                cur_type = (neutral_by_lap.get(nl) or {}).get('type')
+                severity = {'VSC': 1, 'SafetyCar': 2, 'RedFlag': 3}
+                if cur_type is None or severity[info['type']] > severity[cur_type]:
+                    neutral_by_lap[nl] = info
+
         track = str(l_meta['track_name']).strip()
         year = int(l_meta['date'].year) if l_meta['date'] else None
         l_code = str(l_meta['driver_code']).strip().upper()
         c_code = str(c_meta['driver_code']).strip().upper()
+        # Pit stops keyed by DRIVER code — the roles (leader/chaser) swap
+        # on passes, but a driver's stops never move.
+        pits_by_code = {l_code: leader_pits, c_code: chaser_pits}
 
         race_end = min(max(leader_laps), max(chaser_laps))
         if end_lap:
@@ -896,6 +1231,34 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
             heat_acc = [{"total": 0.0, "hot_count": 0, "max": 0.0}
                         for _ in range(RACE_SEGMENTS)]
 
+            def _pit_jump(L, gap, ahead_code, behind_code):
+                """Pit-stop gap jump for lap L (one-sided stops only).
+
+                The pitting driver loses the pit-lane delta this lap: the
+                leader stopping closes the gap, the chaser stopping grows
+                it.  A leader whose gap goes negative rejoined BEHIND — a
+                pit-stop overtake (caller swaps roles).  Both cars stopping
+                the same lap cancels.  Returns (gap, pit_event, swapped).
+                """
+                lead_stop = (pits_by_code.get(ahead_code) or {}).get(L)
+                chase_stop = (pits_by_code.get(behind_code) or {}).get(L)
+                if not (lead_stop or chase_stop) or (lead_stop and chase_stop):
+                    return gap, None, False
+                stop = lead_stop or chase_stop
+                loss = stop.get('pit_loss_s') or PIT_LOSS_FALLBACK_S
+                gap += (-loss) if lead_stop else loss
+                pit_event = {"code": (ahead_code if lead_stop else behind_code),
+                             "lap": L,
+                             "compound": stop.get('compound'),
+                             "pit_loss_s": round(loss, 2),
+                             "estimated": stop.get('pit_loss_s') is None}
+                swapped = False
+                if gap <= 0.05:
+                    gap = 0.6
+                    swapped = True
+                    pit_event["overtake"] = True
+                return gap, pit_event, swapped
+
             for L in range(start, race_end + 1):
                 if len(laps_out) >= max_laps:
                     break
@@ -904,6 +1267,57 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                 if llap is None or clap is None:
                     skipped.append(L)
                     continue
+
+                # NEUTRALISATION MODEL (SC / VSC / RedFlag): pace deltas are
+                # meaningless at reduced speed, so the pace model is skipped
+                # and no overtake is modeled.  The field bunches: the pair's
+                # gap compresses toward the train each neutral lap (SC harder
+                # than VSC), and the restart resumes racing from that bunched
+                # gap.  Pit stops under the flag still jump the gap.
+                neutral = neutral_by_lap.get(L)
+                if neutral is not None:
+                    ntype = neutral['type']
+                    factor = 0.35 if ntype in ('SafetyCar', 'RedFlag') else 0.70
+                    gap_pre = gap
+                    gap = max(0.3, gap * factor)
+                    rec = {
+                        "lap": L,
+                        "gap_before_s": round(gap_pre, 3),
+                        "gap_after_s": round(gap, 3),
+                        "closing_rate_s": 0.0,
+                        "overtake_probability": 0.0,
+                        "pace_gap_s": 0.0,
+                        "energy_diff_mj": 0.0,
+                        "deployed_mj": 0.0,
+                        "sectors": [{"sector": k + 1, "share": 0.0,
+                                     "probability": 0.0} for k in range(3)],
+                        "corner_mass": [0.0] * RACE_SEGMENTS,
+                        "hot_zone": None,
+                        "passed": False,
+                        "pass_sector": None,
+                        "neutral": {"type": ntype, "lap": L},
+                    }
+                    if not light:
+                        rec.update({
+                            "leader": {"code": lead_code,
+                                        "tyre": llap.get('tyre_compound'),
+                                        "tyre_age": llap.get('tyre_age')},
+                            "chaser": {"code": chase_code,
+                                        "tyre": clap.get('tyre_compound'),
+                                        "tyre_age": clap.get('tyre_age')},
+                            "segments": [],
+                        })
+                    laps_out.append(rec)
+                    gap, pit_event, pit_swapped = _pit_jump(
+                        L, gap, lead_code, chase_code)
+                    if pit_swapped:
+                        lead_by_lap, chase_by_lap = chase_by_lap, lead_by_lap
+                        lead_code, chase_code = chase_code, lead_code
+                    if pit_event is not None:
+                        laps_out[-1]["pit_stop"] = pit_event
+                        laps_out[-1]["gap_after_s"] = round(gap, 3)
+                    continue
+
                 if not llap.get('tyre_compound') or not clap.get('tyre_compound'):
                     skipped.append(L)
                     continue
@@ -1045,6 +1459,21 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                     gap = max(0.3, gap * 0.35)
                 else:
                     gap = max(0.05, gap - closing)
+
+                # PIT STOP MODEL — real stops (tyre_stints / lap-time
+                # detection): the jump, swap and bookkeeping live in the
+                # shared _pit_jump helper (see above).
+                gap, pit_event, pit_swapped = _pit_jump(
+                    L, gap, lead_code, chase_code)
+                if pit_swapped:
+                    lead_by_lap, chase_by_lap = chase_by_lap, lead_by_lap
+                    lead_code, chase_code = chase_code, lead_code
+                    if pass_lap is None:
+                        pass_lap = L
+                        pass_sector = None
+                if pit_event is not None:
+                    laps_out[-1]["pit_stop"] = pit_event
+
                 laps_out[-1]["gap_after_s"] = round(gap, 3)
 
             totals = []
@@ -1088,6 +1517,10 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                                      if laps_out else 0.0),
                 # Driver ahead at the flag (roles may have swapped on a pass).
                 "final_leader": lead_code,
+                # Pit stops applied this run (tyre_stints + slow-pit-lap loss).
+                "pit_stops": [l["pit_stop"] for l in laps_out if l.get("pit_stop")],
+                # Neutral laps this run (SC / VSC / RedFlag windows).
+                "neutralisations": [l["neutral"] for l in laps_out if l.get("neutral")],
                 "calibration": calibration_stats(
                     [c for c, _, _ in calib],
                     [a for _, a, _ in calib],
@@ -1157,7 +1590,8 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
             **{k: primary[k] for k in
                ("laps", "pass_lap", "pass_sector", "final_gap_s",
                 "laps_simulated", "laps_skipped", "sector_totals",
-                "corner_heat", "energy", "calibration")},
+                "corner_heat", "energy", "calibration", "pit_stops",
+                "neutralisations")},
         }
 
         # Every requested extra energy source, symmetric or not, is one

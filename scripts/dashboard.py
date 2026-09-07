@@ -633,6 +633,132 @@ def get_latest_lap():
             except: pass
 
 
+# LIVE BATTLE STATE for the Hammer Time Race Call ---------------------------
+# Reconstructs the two selected drivers' live state (tyre compound/age,
+# current lap, timing gap) from the live lap feed, so the Race Call can be
+# synced from the UDP capture instead of typed by hand.  The gap is the
+# standard "time behind at the line": how much later the chaser completed
+# the same lap number the leader completed (captured_at is written at lap
+# completion by the capture loop, so same-machine clocks are comparable).
+@app.route('/api/live/battle-state')
+def live_battle_state():
+    conn = None
+    cursor = None
+    try:
+        leader = request.args.get('leader', '').strip().upper()
+        chaser = request.args.get('chaser', '').strip().upper()
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cutoff = (datetime.datetime.now() - LIVE_WINDOW) \
+            .strftime('%Y-%m-%d %H:%M:%S')
+
+        def _latest(code):
+            cursor.execute("""
+                SELECT d.driver_code, d.driver_name, l.lap_number,
+                       l.lap_time_ms, l.tyre_compound, l.tyre_age,
+                       l.captured_at, l.session_id, s.track_name,
+                       YEAR(s.date) AS year
+                FROM laps l
+                JOIN drivers d ON l.driver_id = d.driver_id
+                JOIN sessions s ON l.session_id = s.session_id
+                WHERE d.driver_code = %s AND l.lap_time_ms > 0
+                  AND l.captured_at >= %s
+                ORDER BY l.lap_id DESC
+                LIMIT 1
+            """, (code, cutoff))
+            return cursor.fetchone()
+
+        def _lap_completed_at(code, lap_number):
+            """Wall-clock time this driver completed a specific lap."""
+            cursor.execute("""
+                SELECT l.captured_at FROM laps l
+                JOIN drivers d ON l.driver_id = d.driver_id
+                WHERE d.driver_code = %s AND l.lap_number = %s
+                  AND l.lap_time_ms > 0 AND l.captured_at >= %s
+                ORDER BY l.lap_id DESC
+                LIMIT 1
+            """, (code, lap_number, cutoff))
+            row = cursor.fetchone()
+            return row['captured_at'] if row else None
+
+        # The two most recently live drivers — the fallback pair suggestion
+        # when the selected pair has no laps in the live window.
+        cursor.execute("""
+            SELECT d.driver_code, MAX(l.captured_at) AS last_seen
+            FROM laps l JOIN drivers d ON l.driver_id = d.driver_id
+            WHERE l.lap_time_ms > 0 AND l.captured_at >= %s
+            GROUP BY d.driver_code
+            ORDER BY last_seen DESC
+            LIMIT 2
+        """, (cutoff,))
+        live_now = [r['driver_code'] for r in cursor.fetchall()]
+
+        if not leader or not chaser:
+            return jsonify({"live": False, "stale": [leader, chaser],
+                            "live_now": live_now})
+
+        A, B = _latest(leader), _latest(chaser)
+        stale = [c for c, row in ((leader, A), (chaser, B)) if row is None]
+        if stale:
+            return jsonify({"live": False, "stale": stale,
+                            "live_now": live_now})
+
+        def _side(row):
+            return {
+                "code": row['driver_code'],
+                "name": row['driver_name'],
+                "lap": int(row['lap_number'] or 0),
+                "tyre": (str(row['tyre_compound']).strip()
+                         if row['tyre_compound'] else None),
+                "tyre_age": int(row['tyre_age'] or 0),
+                "last_lap_s": (round(float(row['lap_time_ms']) / 1000.0, 3)
+                               if row['lap_time_ms'] else None),
+                "session_id": int(row['session_id'] or 0),
+                "captured_at": str(row['captured_at']),
+            }
+
+        same_race = (str(A['track_name']).strip().lower()
+                     == str(B['track_name']).strip().lower())
+        common_lap = min(int(A['lap_number'] or 0), int(B['lap_number'] or 0))
+        gap_s = None
+        if same_race and common_lap >= 1:
+            tA = _lap_completed_at(leader, common_lap)
+            tB = _lap_completed_at(chaser, common_lap)
+            if tA and tB:
+                # Positive = the picked chaser completed the shared lap
+                # LATER than the picked leader → chaser is behind (gap).
+                # Negative = the picked "chaser" is actually ahead.
+                gap_s = round((tB - tA).total_seconds(), 1)
+
+        resp = {
+            "live": True,
+            "same_race": same_race,
+            "track": A['track_name'],
+            "year": int(A['year']) if A.get('year') else None,
+            "leader": _side(A),
+            "chaser": _side(B),
+            "common_lap": common_lap,
+            "gap_s": gap_s,
+            "ahead_code": (leader if (gap_s is None or gap_s >= 0)
+                           else chaser),
+            "live_now": live_now,
+        }
+        if not same_race:
+            resp["note"] = (f"{leader} and {chaser} are live on different "
+                            "tracks — a pair battle needs the same race.")
+        return jsonify(resp)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if cursor:
+            try: cursor.close()
+            except: pass
+        if conn:
+            try: conn.close()
+            except: pass
+
+
 # DASHBOARD DRIVER LIST
 @app.route('/api/drivers/list')
 def get_drivers_list():
