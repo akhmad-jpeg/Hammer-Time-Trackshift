@@ -1,7 +1,7 @@
 {
  "meta": {
   "script": "scripts/benchmark_energy_strategy.py",
-  "generated_at": "2026-09-07T18:07:12",
+  "generated_at": "2026-09-07T19:13:52",
   "command": "scripts/benchmark_energy_strategy.py",
   "deck_claim": "Trackshift 'Hammer Time' deck p.8: '-1.8s race time improvement' of AI strategy vs 'Flat-Out' baseline, 2023 Monaco GP",
   "flat_out_mode": "push",

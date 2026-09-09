@@ -12,6 +12,12 @@ venv/
 # ── Database exports (large generated .sql dumps) ───────────────────────────
 database/exports/
 
+# ── Per-race energy-benchmark artifacts (regenerable, ~40MB full sweep) ─────
+# The committed artifact is the small fleet summary
+# (backtests/energy_fleet_summary.json); the full per-race files below are
+# deterministic regenerations written by scripts/benchmark_energy_fleet.py.
+backtests/energy/
+
 # ── Local caches / runtime state ────────────────────────────────────────────
 .freebuff/
 f1_cache/

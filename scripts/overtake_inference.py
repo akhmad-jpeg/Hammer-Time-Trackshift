@@ -41,6 +41,7 @@ import joblib
 import pandas as pd
 
 from driver_comparison import load_driver_model
+from tyre_degradation import tyre_health as _tyre_health_pct
 from feature_pipeline import (
     construct_prediction_input,
     covered_tracks as lap_covered_tracks,
@@ -284,19 +285,47 @@ ENERGY_DIFF_CLIP_MAX = 0.6
 # laps): a typical mid-field pit delta at racing pace.
 PIT_LOSS_FALLBACK_S = 20.0
 
+# Plausibility bounds for a laps-derived pit loss.  A real pit-lane delta at
+# racing pace is roughly 16-28 s (track-dependent); an estimated loss outside
+# these bounds almost always means a neighbour lap was polluted by a SC/VSC
+# window, traffic or an outage, so it is discarded (the caller then falls
+# back to PIT_LOSS_FALLBACK_S) rather than feeding the sim a nonsense jump.
+PIT_LOSS_MIN_S = 8.0
+PIT_LOSS_MAX_S = 40.0
+
+# A mid-stint tyre-age GLITCH (a one-lap dip, e.g. 14 -> 7 -> 8, or a small
+# <=2-lap decrease from a sensor/import hiccup) must not read as a pit stop:
+# a real stop RE-STARTS the age (the next lap continues upward from the new
+# base) and comes with a slow pit lap.  Both checks below encode that.
+PIT_AGE_GLITCH_MAX_LAPS = 2
+
 
 def _pit_stops_from_laps(session_id, conn):
-    """Derive pit stops from the laps table (fallback: tyre_stints empty).
+    """Derive pit stops from the laps table's tyre-age resets / compound changes.
 
-    A stop is a lap whose tyre_age resets vs the previous lap or whose
-    compound changes — in this dataset the PIT LAP ITSELF carries the NEW
-    compound (age 1/low age) and its lap time includes the pit-lane
-    transit (the slow-pit-lap spike, e.g. 115s vs a ~95s baseline).
+    A stop is a lap whose tyre compound changes, or whose tyre_age resets vs
+    the previous lap AND whose next lap continues upward from the new base
+    (a genuine re-start, not a one-lap sensor dip) — in this dataset the PIT
+    LAP ITSELF carries the NEW compound (age 1/low age) and its lap time
+    includes the pit-lane transit (the slow-pit-lap spike, e.g. 115s vs a
+    ~95s baseline).
+
+    Robustness over the naive reset detector:
+      * Age glitches filtered — a 1-lap dip or a small (<=2 lap) decrease
+        with the age resuming upward is a data artefact, not a stop.
+      * Lap-number gaps respected — neighbours are taken from ADJACENT ROWS
+        in the timed-lap sequence, never from lap numbers that may straddle
+        a long missing-lap gap.
+      * Robust pit-loss estimate — the loss is the pit lap's time minus the
+        MEDIAN of up to 3 clean neighbours each side (median, so one SC- or
+        traffic-polluted lap cannot skew the delta), and implausible values
+        (< PIT_LOSS_MIN_S / > PIT_LOSS_MAX_S) are discarded to None so the
+        caller falls back to PIT_LOSS_FALLBACK_S instead of trusting them.
     """
     cur = conn.cursor(dictionary=True)
     try:
         cur.execute("""
-            SELECT lap_number, lap_time_ms, tyre_compound, tyre_age
+            SELECT lap_number, lap_time_ms, tyre_compound, tyre_age, is_valid
             FROM laps WHERE session_id = %s AND lap_time_ms > 0
             ORDER BY lap_number
         """, (session_id,))
@@ -305,42 +334,77 @@ def _pit_stops_from_laps(session_id, conn):
         cur.close()
     if len(laps) < 5:
         return {}
+
+    n = len(laps)
     resets = []
-    for i in range(1, len(laps)):
+    for i in range(1, n):
         prev, nxt = laps[i - 1], laps[i]
         compound_changed = (
             prev['tyre_compound'] and nxt['tyre_compound']
             and str(prev['tyre_compound']).strip()
                 != str(nxt['tyre_compound']).strip())
-        age_reset = (
-            prev['tyre_age'] is not None and nxt['tyre_age'] is not None
-            and float(nxt['tyre_age']) < float(prev['tyre_age']))
+        age_reset = False
+        if (not compound_changed
+                and prev['tyre_age'] is not None
+                and nxt['tyre_age'] is not None
+                and float(nxt['tyre_age']) < float(prev['tyre_age'])):
+            if i + 1 < n and laps[i + 1]['tyre_age'] is not None:
+                # Real stop: the age re-starts and keeps climbing from the
+                # new base.  A glitch dips for exactly one lap (next age is
+                # back ABOVE the pre-dip level) or resumes almost unchanged.
+                after = float(laps[i + 1]['tyre_age'])
+                new_base = float(nxt['tyre_age'])
+                pre = float(prev['tyre_age'])
+                one_lap_dip = after >= pre
+                small_dip = (pre - new_base) <= PIT_AGE_GLITCH_MAX_LAPS
+                continues_up = after >= new_base
+                age_reset = continues_up and not one_lap_dip and not small_dip
+            # No next lap to confirm: only trust a LARGE reset (a real stop
+            # re-starts from ~0-5, a glitch shaves a lap or two).
+            else:
+                age_reset = (float(prev['tyre_age'])
+                             - float(nxt['tyre_age'])) > PIT_AGE_GLITCH_MAX_LAPS
         if compound_changed or age_reset:
-            resets.append(nxt)
+            resets.append(i)
     if not resets:
         return {}
-    pit_laps = {int(r['lap_number']) for r in resets}
-    times = {int(r['lap_number']): float(r['lap_time_ms']) / 1000.0
-             for r in laps}
+
+    pit_rows = {i for i in resets}
+    # Lap times in ROW order (the sequence of timed laps), so neighbours are
+    # temporally adjacent even when lap numbers have gaps.
+    times = [float(l['lap_time_ms']) / 1000.0 for l in laps]
     stops = {}
-    for r in resets:
-        L = int(r['lap_number'])
-        lt = times[L]
-        ref = [times[n] for n in range(L - 2, L + 3)
-               if n in times and n != L and n not in pit_laps]
-        loss = round(lt - (sum(ref) / len(ref)), 2) if ref else None
+    for i in resets:
+        L = int(laps[i]['lap_number'])
+        # Ref laps: up to 3 clean rows each side, skipping other pit laps.
+        ref = []
+        for step in (-1, -2, -3, 1, 2, 3):
+            j = i + step
+            if 0 <= j < n and j not in pit_rows:
+                ref.append(times[j])
+            if len(ref) >= 4:
+                break
+        if len(ref) >= 2:
+            ref.sort()
+            median = ref[len(ref) // 2] if len(ref) % 2 \
+                else 0.5 * (ref[len(ref) // 2 - 1] + ref[len(ref) // 2])
+            loss = round(times[i] - median, 2)
+            if not (PIT_LOSS_MIN_S <= loss <= PIT_LOSS_MAX_S):
+                loss = None  # polluted / implausible -> caller falls back
+        else:
+            loss = None
         stops[L] = {
-            "compound": (str(r['tyre_compound']).strip()
-                          if r['tyre_compound'] else None),
-            "pit_loss_s": loss if (loss is not None and loss > 0) else None,
+            "compound": (str(laps[i]['tyre_compound']).strip()
+                         if laps[i]['tyre_compound'] else None),
+            "pit_loss_s": loss,
         }
     return stops
 
 
 def _load_pit_stops(session_id, conn):
-    """Pit stops for one session, from tyre_stints (preferred) or laps.
+    """Pit stops for one session, derived from the laps table.
 
-    Returns {lap_number: {'compound', 'stint_number'?, 'pit_loss_s'}}.
+    Returns {lap_number: {'compound', 'pit_loss_s'}}.
     ``pit_loss_s`` estimates the total time lost that lap: the pit lap's
     own time minus the mean of the driver's neighbouring "green" laps
     (up to 2 either side, other pit laps excluded) — the standard
@@ -348,88 +412,7 @@ def _load_pit_stops(session_id, conn):
     timing to estimate it (the caller then falls back to
     PIT_LOSS_FALLBACK_S).
     """
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("""
-            SELECT stint_number, start_lap, tyre_compound
-            FROM tyre_stints
-            WHERE session_id = %s AND stint_number > 1 AND start_lap > 1
-            ORDER BY start_lap
-        """, (session_id,))
-        stints = cur.fetchall()
-    finally:
-        cur.close()
-    if not stints:
-        # tyre_stints is not populated for this session (the historical
-        # importer never fills it) — derive the stops from the laps table's
-        # tyre-age resets / compound changes instead.
-        return _pit_stops_from_laps(session_id, conn)
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("""
-            SELECT lap_number, lap_time_ms FROM laps
-            WHERE session_id = %s AND lap_time_ms > 0
-            ORDER BY lap_number
-        """, (session_id,))
-        times = {int(r['lap_number']): float(r['lap_time_ms']) / 1000.0
-                 for r in cur.fetchall()}
-    finally:
-        cur.close()
-    pit_laps = {int(s['start_lap']) for s in stints}
-    stops = {}
-    for st in stints:
-        L = int(st['start_lap'])
-        lt = times.get(L)
-        if lt is None:
-            continue
-        ref = [times[n] for n in range(L - 2, L + 3)
-               if n in times and n != L and n not in pit_laps]
-        loss = round(lt - (sum(ref) / len(ref)), 2) if ref else None
-        stops[L] = {
-            "compound": (str(st['tyre_compound']).strip()
-                          if st['tyre_compound'] else None),
-            "stint_number": int(st['stint_number']),
-            "pit_loss_s": loss if (loss is not None and loss > 0) else None,
-        }
-    return stops
-
-
-def _fill_tyres_from_stints(laps_by_lap, session_id, conn):
-    """Fill missing tyre compound/age from the session's tyre_stints.
-
-    Pit laps and the first lap after a stop frequently miss compound/age
-    in the laps table, which made the replay skip exactly those laps.
-    The stint table (start_lap, compound, starting_tyre_age) fills them.
-    Returns the number of laps fixed.
-    """
-    cur = conn.cursor(dictionary=True)
-    try:
-        cur.execute("""
-            SELECT start_lap, end_lap, tyre_compound, starting_tyre_age
-            FROM tyre_stints WHERE session_id = %s
-            ORDER BY start_lap
-        """, (session_id,))
-        stints = cur.fetchall()
-    finally:
-        cur.close()
-    if not stints:
-        return 0
-    filled = 0
-    for lap in laps_by_lap.values():
-        L = int(lap['lap_number'])
-        if lap.get('tyre_compound'):
-            continue
-        for st in stints:
-            s_start = int(st['start_lap'])
-            s_end = int(st['end_lap']) if st['end_lap'] is not None else None
-            if L >= s_start and (s_end is None or L <= s_end):
-                lap['tyre_compound'] = str(st['tyre_compound']).strip()
-                base = (float(st['starting_tyre_age'])
-                        if st['starting_tyre_age'] is not None else 0.0)
-                lap['tyre_age'] = float(base + (L - s_start))
-                filled += 1
-                break
-    return filled
+    return _pit_stops_from_laps(session_id, conn)
 
 
 def _detect_neutralisations(laps):
@@ -1060,15 +1043,12 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
         if not leader_laps or not chaser_laps:
             raise ValueError("One of the sessions has no timed laps.")
 
-        # Real pit stops (tyre_stints): the pitting driver loses the
-        # pit-lane delta that lap, so the pair's projected gap jumps at
-        # every one-sided stop — and missing tyre context around stops is
-        # back-filled from the stint table so those laps score instead of
-        # being skipped.  Stops follow the DRIVER (roles may swap mid-race).
+        # Real pit stops (detected from the laps table's tyre-age resets /
+        # compound changes): the pitting driver loses the pit-lane delta
+        # that lap, so the pair's projected gap jumps at every one-sided
+        # stop.  Stops follow the DRIVER (roles may swap mid-race).
         leader_pits = _load_pit_stops(int(leader_session_id), conn)
         chaser_pits = _load_pit_stops(int(chaser_session_id), conn)
-        _fill_tyres_from_stints(leader_laps, int(leader_session_id), conn)
-        _fill_tyres_from_stints(chaser_laps, int(chaser_session_id), conn)
 
         # Neutralisations (SC / VSC / RedFlag): strategy_events rows anchored
         # to these sessions' laps; when the table has none, windows are
@@ -1301,10 +1281,16 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                         rec.update({
                             "leader": {"code": lead_code,
                                         "tyre": llap.get('tyre_compound'),
-                                        "tyre_age": llap.get('tyre_age')},
+                                        "tyre_age": llap.get('tyre_age'),
+                                        "tyre_health": _tyre_health_pct(
+                                            llap.get('tyre_compound'),
+                                            llap.get('tyre_age'), track)},
                             "chaser": {"code": chase_code,
                                         "tyre": clap.get('tyre_compound'),
-                                        "tyre_age": clap.get('tyre_age')},
+                                        "tyre_age": clap.get('tyre_age'),
+                                        "tyre_health": _tyre_health_pct(
+                                            clap.get('tyre_compound'),
+                                            clap.get('tyre_age'), track)},
                             "segments": [],
                         })
                     laps_out.append(rec)
@@ -1433,10 +1419,16 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                         "fuel_diff_kg": round(fuel_diff, 3),
                         "leader": {"code": lead_code,
                                     "tyre": llap['tyre_compound'],
-                                    "tyre_age": llap['tyre_age']},
+                                    "tyre_age": llap['tyre_age'],
+                                    "tyre_health": _tyre_health_pct(
+                                        llap['tyre_compound'],
+                                        llap['tyre_age'], track)},
                         "chaser": {"code": chase_code,
                                     "tyre": clap['tyre_compound'],
-                                    "tyre_age": clap['tyre_age']},
+                                    "tyre_age": clap['tyre_age'],
+                                    "tyre_health": _tyre_health_pct(
+                                        clap['tyre_compound'],
+                                        clap['tyre_age'], track)},
                     })
                     # Intra-lap gap path at segment resolution (dashboard's
                     # in-lap chart): running gap after each segment.
@@ -1460,8 +1452,8 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                 else:
                     gap = max(0.05, gap - closing)
 
-                # PIT STOP MODEL — real stops (tyre_stints / lap-time
-                # detection): the jump, swap and bookkeeping live in the
+                # PIT STOP MODEL — real stops (lap-time detection): the
+                # jump, swap and bookkeeping live in the
                 # shared _pit_jump helper (see above).
                 gap, pit_event, pit_swapped = _pit_jump(
                     L, gap, lead_code, chase_code)
@@ -1517,7 +1509,7 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                                      if laps_out else 0.0),
                 # Driver ahead at the flag (roles may have swapped on a pass).
                 "final_leader": lead_code,
-                # Pit stops applied this run (tyre_stints + slow-pit-lap loss).
+                # Pit stops applied this run (lap-detected + slow-pit-lap loss).
                 "pit_stops": [l["pit_stop"] for l in laps_out if l.get("pit_stop")],
                 # Neutral laps this run (SC / VSC / RedFlag windows).
                 "neutralisations": [l["neutral"] for l in laps_out if l.get("neutral")],

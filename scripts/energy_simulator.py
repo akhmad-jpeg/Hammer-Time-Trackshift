@@ -82,10 +82,74 @@ Usage:
 
 import argparse
 import sys
+import re
+import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import get_db_connection
+
+# ---------------------------------------------------------------------------
+# Track-name resolution for per-track energy pace profiles.
+#
+# The sessions table and the training artifact (ml_models/energy_pace.json)
+# disagree on a handful of track names, so an exact-string lookup silently
+# misses measured profiles and falls back to the flat global constant:
+#   * case only -- 'Circuit de Barcelona-Catalunya' vs 'Circuit De
+#     Barcelona-Catalunya' (same for Monza's di/Di, Imola's e/E, Mugello's
+#     del/Del);
+#   * short/full pairs -- the DB stores some seasons under the short name
+#     ('Monaco', 'Miami Gardens') and others under the full name ('Circuit de
+#     Monaco', 'Miami International Autodrome').  The training artifact holds
+#     BOTH spellings as separate entries with different measured s/MJ (same
+#     circuit, different telemetry samples), so without an alias the same
+#     circuit silently uses two different values depending on which season
+#     you look at.
+#
+# Resolution: NFC-normalise + casefold + collapse whitespace on both sides
+# (fixes all four case-only tracks), then alias the short/full pairs to a
+# single canonical entry.  Canonical entry per pair = the larger measured
+# sample (laps count in the artifact): Monaco 464 > 225, Miami Gardens
+# 297 > 190.
+# ---------------------------------------------------------------------------
+TRACK_NAME_ALIASES = {
+    'circuit de monaco': 'monaco',               # -> 'Monaco' (464 laps, 0.1543)
+    'miami international autodrome': 'miami gardens',  # -> 'Miami Gardens' (297 laps)
+}
+
+
+def normalize_track_name(name):
+    """Canonical form for track-name lookups: NFC, casefold, collapse spaces."""
+    s = unicodedata.normalize('NFC', str(name or '').strip())
+    return ' '.join(s.lower().split())
+
+
+def canonical_track_name(name):
+    """Normalised track name with short/full-name aliases resolved.
+
+    'Circuit de Monaco' -> 'monaco', 'Miami International Autodrome' ->
+    'miami gardens'.  Use this (not normalize_track_name) when matching a
+    DB track name against a keyed profile/table that may hold either
+    spelling.
+    """
+    return TRACK_NAME_ALIASES.get(normalize_track_name(name), normalize_track_name(name))
+
+
+def resolve_track_profile(track_name, per_track):
+    """The measured profile entry for a DB track name, or None.
+
+    `per_track` is the 'per_track' dict from ml_models/energy_pace.json.
+    Exact-name lookup misses the case-variant and short/full-name tracks
+    (see TRACK_NAME_ALIASES), silently falling back to the flat constant
+    -- which skews race-time projections by ~30-45% on those circuits.
+    """
+    if not per_track:
+        return None
+    n = canonical_track_name(track_name)
+    for key, entry in per_track.items():
+        if canonical_track_name(key) == n:
+            return entry
+    return None
 
 # ---------------------------------------------------------------------------
 # Power-unit specs, per regulation era.  A session's year picks its spec, so a

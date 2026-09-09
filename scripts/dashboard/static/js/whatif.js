@@ -17,6 +17,10 @@ function htToggle(modId, btn) {
     if (!mod) return;
     const open = mod.classList.toggle('open');
     if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && modId === 'ht-validation' && !mod.dataset.loaded) {
+        mod.dataset.loaded = '1';
+        loadEnergyBenchmark();
+    }
 }
 
 // ── Hammer Time redesign helpers ─────────────────────────────────────────
@@ -68,17 +72,6 @@ function htEditScenario(btn) {
     const open = mod.classList.toggle('open');
     if (btn) btn.textContent = open ? 'CLOSE SCENARIO' : 'EDIT SCENARIO';
     if (open) mod.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function htOpenModule(id) {
-    const mod = document.getElementById(id);
-    if (!mod) return;
-    if (!mod.classList.contains('open')) {
-        mod.classList.add('open');
-        const h = mod.querySelector('.ht-head');
-        if (h) h.setAttribute('aria-expanded', 'true');
-    }
-    setTimeout(() => mod.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
 }
 
 function elShow(which) {
@@ -398,6 +391,13 @@ const trustDot = t => `<span style="color:${TRUST_COLORS[t] || '#777'}" title="t
 // attacks on Push while the chaser holds Balanced).  Colour by the leader
 // car's spec so a duel reads against the attacking side; "stored>X" rows
 // (real trace vs a what-if mode) inherit the stored grey.
+// Tyre-health traffic light for the replay's DRIVERS column (shared
+// health timeline with the main dashboard's Tyre Degradation chart).
+const healthColor = h => h == null ? '#888' : h >= 60 ? '#00c853' : h >= 30 ? '#ffd700' : '#ff6b6b';
+const tyreHealthSpan = h => h == null
+    ? ''
+    : `<span style="color:${healthColor(h)}" title="tyre health (Pirelli-style model)">&nbsp;·&nbsp;${Math.round(h)}%</span>`;
+
 const srcColor = key => {
     if (!key) return '#ccc';
     const s = String(key);
@@ -1126,7 +1126,7 @@ function renderFullRace(r) {
             `<span>${sectorBarPct(100 * s1.probability, '#ffd700')} S1</span>` +
             `<span>${sectorBarPct(100 * s2.probability, '#ff9f43')} S2</span>` +
             `<span>${sectorBarPct(100 * s3.probability, '#ff6b6b')} S3</span>` +
-            `<span>${l.leader.code} ${l.leader.tyre}${Math.round(l.leader.tyre_age)} · ${l.chaser.code} ${l.chaser.tyre}${Math.round(l.chaser.tyre_age)}</span>` +
+            `<span>${l.leader.code} <span style="color:${TYRE_COLORS[l.leader.tyre] || '#00d2be'}">${l.leader.tyre}</span>${Math.round(l.leader.tyre_age)}${tyreHealthSpan(l.leader.tyre_health)} · ${l.chaser.code} <span style="color:${TYRE_COLORS[l.chaser.tyre] || '#00d2be'}">${l.chaser.tyre}</span>${Math.round(l.chaser.tyre_age)}${tyreHealthSpan(l.chaser.tyre_health)}</span>` +
             `<span style="color:#ffd700">${l.hot_zone ? '▸S' + l.hot_zone.sector + '@' + Math.round(100 * l.hot_zone.fraction) + '%' : ''}</span>` +
             `<span>${pass}${l.pit_stop ? ` <span class="pit-chip" title="Pit stop modeled: loss ~${l.pit_stop.pit_loss_s}s → gap ${l.pit_stop.overtake ? 'swap' : 'jump'}">Ⓟ ${l.pit_stop.code}${l.pit_stop.overtake ? ' · swap' : ''}</span>` : ''}${l.neutral ? ` <span class="sc-chip" title="Neutralisation: field bunches, gap compresses, no overtaking modeled">Ⓝ ${l.neutral.type}</span>` : ''}</span></div>`;
     }).join('');
@@ -1466,7 +1466,7 @@ function exportRaceCsv() {
     const m = r.meta || {};
     const header = ['lap', 'gap_before_s', 'gap_after_s', 'closing_rate_s', 'pace_gap_s',
                     'overtake_probability', 's1_probability', 's2_probability', 's3_probability',
-                    'energy_diff_mj', 'fuel_diff_kg', 'leader', 'leader_tyre', 'leader_tyre_age',                    'chaser', 'chaser_tyre', 'chaser_tyre_age',
+                    'energy_diff_mj', 'fuel_diff_kg', 'leader', 'leader_tyre', 'leader_tyre_age', 'leader_tyre_health',                    'chaser', 'chaser_tyre', 'chaser_tyre_age', 'chaser_tyre_health',
                     'passed', 'hot_zone', 'pit_stop', 'neutral'];
     const esc = v => {
         if (v === null || v === undefined) return '';
@@ -1477,8 +1477,8 @@ function exportRaceCsv() {
         l.lap, l.gap_before_s, l.gap_after_s, l.closing_rate_s, l.pace_gap_s,
         l.overtake_probability, l.sectors[0].probability, l.sectors[1].probability, l.sectors[2].probability,
         l.energy_diff_mj, l.fuel_diff_kg,
-        l.leader.code, l.leader.tyre, l.leader.tyre_age,
-        l.chaser.code, l.chaser.tyre, l.chaser.tyre_age,
+        l.leader.code, l.leader.tyre, l.leader.tyre_age, l.leader.tyre_health,
+        l.chaser.code, l.chaser.tyre, l.chaser.tyre_age, l.chaser.tyre_health,
         l.passed ? 1 : 0,
         l.hot_zone ? `S${l.hot_zone.sector}@${Math.round(100 * l.hot_zone.fraction)}%` : '',
         l.pit_stop ? `${l.pit_stop.code} ${l.pit_stop.compound || ''} loss~${l.pit_stop.pit_loss_s}s${l.pit_stop.overtake ? ' swap' : ''}` : '',
@@ -1531,3 +1531,321 @@ function exportRaceJson() {
 // Auto-refresh: when the energy simulator rewrites race_state for one of the
 // displayed race's sessions, re-run the full race so the energy_diff counter
 // (real vs imputed) drops live without a page reload.
+
+// ── VALIDATION — energy benchmark (deck's −1.8s claim + every stored race) ──
+// Serves the fleet summary (backtests/energy_fleet_summary.json, written by
+// scripts/benchmark_energy_fleet.py) plus full per-race artifacts, and
+// re-runs the selected race's benchmark on demand.  Monaco 2023 is the deck
+// anchor: its artifact carries the deck-claim metadata, so the reproduction
+// badge shows exactly there and nowhere else.
+let bmEnergyChart = null;
+let bmFleetData = null;      // last fleet summary payload
+let bmCurrentRace = null;    // {key, track, year} of the selected race
+
+const bmEsc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const bmNormTrack = s => String(s || '').trim().toLowerCase();
+
+// INIT — first open of the Validation module (wired in htToggle).
+async function loadEnergyBenchmark() {
+    const out = document.getElementById('bm-energy-out');
+    const err = document.getElementById('bm-energy-err');
+    if (err) err.style.display = 'none';
+    if (out) out.innerHTML = '<div class="chart-note">Loading fleet summary…</div>';
+    try {
+        const res = await fetch('/api/benchmark/energy/fleet');
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        bmFleetData = data;
+        renderFleetTable(data);
+        populateRaceSelects(data.races || []);
+    } catch (e) {
+        if (out) out.innerHTML = '';
+        if (err) { err.textContent = 'Error: ' + e.message; err.style.display = 'block'; }
+    }
+}
+
+function populateRaceSelects(races) {
+    const ts = document.getElementById('bm-track'), ys = document.getElementById('bm-year');
+    if (!ts || !ys) return;
+    const tracks = [...new Set(races.map(r => r.track))].sort((a, b) => a.localeCompare(b));
+    ts.innerHTML = tracks.map(t => `<option value="${bmEsc(t)}">${bmEsc(t)}</option>`).join('');
+    // Default to Monaco (the deck anchor), else the alphabetically first.
+    ts.value = tracks.find(t => bmNormTrack(t) === 'monaco') || tracks[0];
+    bmYearOptions();
+}
+
+function bmYearOptions() {
+    const ts = document.getElementById('bm-track'), ys = document.getElementById('bm-year');
+    if (!ts || !ys || !bmFleetData) return;
+    const track = ts.value;
+    const years = [...new Set((bmFleetData.races || []).filter(r => r.track === track).map(r => r.year))].sort();
+    ys.innerHTML = years.map(y => `<option value="${bmEsc(y)}">${bmEsc(y)}</option>`).join('');
+    ys.value = (bmNormTrack(track) === 'monaco' && years.includes('2023')) ? '2023' : (years[years.length - 1] || '');
+    bmSelectRace();
+}
+
+async function bmSelectRace() {
+    const ts = document.getElementById('bm-track'), ys = document.getElementById('bm-year');
+    if (!ts || !ys || !bmFleetData || !ts.value || !ys.value) return;
+    const races = (bmFleetData.races || []).filter(r => r.track === ts.value && r.year === ys.value);
+    if (!races.length) return;
+    const race = races[races.length - 1];   // latest date within the season
+    bmCurrentRace = { key: race.key, track: race.track, year: race.year };
+    const label = document.getElementById('bm-race-label');
+    if (label) label.textContent = race.track + ' · ' + race.date + ' · ' + race.sessions + ' drivers';
+    await loadEnergyRace(race.key);
+}
+
+async function loadEnergyRace(key) {
+    const out = document.getElementById('bm-energy-out');
+    const err = document.getElementById('bm-energy-err');
+    if (err) err.style.display = 'none';
+    if (out) out.innerHTML = '<div class="chart-note">Loading race benchmark…</div>';
+    try {
+        const res = await fetch('/api/benchmark/energy/race?key=' + encodeURIComponent(key));
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        renderEnergyBenchmark(data);
+    } catch (e) {
+        if (out) out.innerHTML = '';
+        if (err) { err.textContent = 'Error: ' + e.message; err.style.display = 'block'; }
+    }
+}
+
+async function rerunEnergyBenchmark(btn) {
+    const err = document.getElementById('bm-energy-err');
+    if (err) err.style.display = 'none';
+    const q = bmCurrentRace
+        ? `?track=${encodeURIComponent(bmCurrentRace.track)}&year=${bmCurrentRace.year}` : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⟳ RE-RUNNING…'; }
+    try {
+        const res = await fetch('/api/benchmark/energy/run' + q, { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        renderEnergyBenchmark(data);
+    } catch (e) {
+        const out = document.getElementById('bm-energy-out');
+        if (out) out.innerHTML = '';
+        if (err) { err.textContent = 'Error: ' + e.message; err.style.display = 'block'; }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '⟳ RE-RUN BENCHMARK'; }
+    }
+}
+
+async function bmReload() {
+    if (bmCurrentRace) await loadEnergyRace(bmCurrentRace.key);
+}
+
+async function rebuildFleetSummary(btn) {
+    const err = document.getElementById('bm-energy-err');
+    if (err) err.style.display = 'none';
+    if (btn) { btn.disabled = true; btn.textContent = '⟳ REBUILDING…'; }
+    try {
+        const res = await fetch('/api/benchmark/energy/fleet/run', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        const sel = {
+            track: (document.getElementById('bm-track') || {}).value,
+            year: (document.getElementById('bm-year') || {}).value,
+        };
+        bmFleetData = data;
+        renderFleetTable(data);
+        populateRaceSelects(data.races || []);
+        const ts = document.getElementById('bm-track'), ys = document.getElementById('bm-year');
+        if (sel.track && ts && [...ts.options].some(o => o.value === sel.track)) {
+            ts.value = sel.track;
+            const years = [...new Set((bmFleetData.races || []).filter(r => r.track === sel.track).map(r => r.year))].sort();
+            ys.innerHTML = years.map(y => `<option value="${bmEsc(y)}">${bmEsc(y)}</option>`).join('');
+            ys.value = (sel.year && years.includes(sel.year)) ? sel.year : (years[years.length - 1] || '');
+            bmSelectRace();
+        }
+    } catch (e) {
+        const out = document.getElementById('bm-energy-out');
+        if (out) out.innerHTML = '';
+        if (err) { err.textContent = 'Error: ' + e.message; err.style.display = 'block'; }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '⟳ REBUILD FLEET SUMMARY'; }
+    }
+}
+
+function renderFleetTable(data) {
+    const out = document.getElementById('bm-fleet-out');
+    if (!out) return;
+    const races = data.races || [];
+    const head = data.headline || {};
+    if (!races.length) {
+        out.innerHTML = '<div class="chart-note">No races in the fleet summary.</div>';
+        return;
+    }
+    const cols = 'grid-template-columns:minmax(140px,1fr) 56px 40px 48px 74px 84px 84px 90px;';
+    const rows = races.map((r, i) => {
+        const top = i < 5;
+        const basis = r.pace_basis && r.pace_basis.indexOf('flat') === 0 ? 'F' : 'M';
+        return `<div class="tbl-row" style="${cols}${top ? 'border-left:3px solid #ffd700;' : ''}">` +
+            `<span title="${bmEsc(r.track + ' · ' + r.date + ' · ' + r.sessions + ' drivers')}">${bmEsc(r.track)}</span>` +
+            `<span>${bmEsc(r.year)}</span>` +
+            `<span>${r.sessions}</span>` +
+            `<span>${r.laps}</span>` +
+            `<span title="pace basis: ${bmEsc(r.pace_basis)}">${Number(r.pace_s_per_mj).toFixed(4)}<span style="color:#667"> ${basis}</span></span>` +
+            `<span style="color:${r.closing_phase_improvement_s_mean < 0 ? '#00c853' : '#ff6b6b'}">${Number(r.closing_phase_improvement_s_mean).toFixed(2)}s</span>` +
+            `<span style="color:${r.full_race_improvement_s_mean < 0 ? '#00c853' : '#ff6b6b'}">${Number(r.full_race_improvement_s_mean).toFixed(2)}s</span>` +
+            `<span>${bmEsc(r.strategy_mode)}</span></div>`;
+    }).join('');
+    out.innerHTML =
+        `<div class="hc-stats" style="gap:26px;margin-bottom:10px">` +
+        `<div class="hc-stat"><span class="hcs-l">RACES</span><span class="hcs-v">${races.length}</span></div>` +
+        `<div class="hc-stat"><span class="hcs-l">CLOSING MEAN</span><span class="hcs-v" style="color:#00c853">${Number(head.closing_phase_improvement_s_mean).toFixed(2)}s</span></div>` +
+        `<div class="hc-stat"><span class="hcs-l">FULL-RACE MEAN</span><span class="hcs-v" style="color:#00c853">${Number(head.full_race_improvement_s_mean).toFixed(2)}s</span></div>` +
+        `</div>` +
+        `<div class="tbl-wrap"><div class="tbl-row tbl-head" style="${cols}">` +
+        `<span>TRACK</span><span>YEAR</span><span>N</span><span>LAPS</span><span>PACE</span><span>CLOSING</span><span>FULL RACE</span><span>MODE</span></div>${rows}</div>` +
+        `<div class="chart-note" style="margin-top:8px">Sorted by closing-phase gain (biggest first, gold edge = top 5). PACE suffix M = measured per-track s/MJ · F = flat-constant fallback (track not in the measured profile). Click a row to load that race.</div>`;
+    // Row click -> select that race in the pickers.
+    out.querySelectorAll('.tbl-row:not(.tbl-head)').forEach((row, i) => {
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', () => {
+            const r = races[i];
+            const ts = document.getElementById('bm-track'), ys = document.getElementById('bm-year');
+            if (!ts || !ys) return;
+            ts.value = r.track;
+            const years = [...new Set((bmFleetData.races || []).filter(x => x.track === r.track).map(x => x.year))].sort();
+            ys.innerHTML = years.map(y => `<option value="${bmEsc(y)}">${bmEsc(y)}</option>`).join('');
+            ys.value = r.year;
+            bmSelectRace();
+        });
+    });
+}
+
+function renderEnergyBenchmark(data) {
+    const out = document.getElementById('bm-energy-out');
+    const err = document.getElementById('bm-energy-err');
+    const meta = document.getElementById('bm-energy-meta');
+    if (!out) return;
+    if (err) err.style.display = 'none';
+
+    const head = data.headline || {};
+    const cfg = data.config || {};
+    const sessions = data.sessions || [];
+    const src = data._source || {};
+    const closeMean = head.closing_phase_improvement_s_mean;
+    const fullMean = head.full_race_improvement_s_mean;
+    const hasDeck = head.deck_claim_s !== undefined;
+    const reproduced = !!head.deck_claim_reproduced;
+    const genAt = (data.meta && data.meta.generated_at) || '';
+
+    const stat = (label, value, sub, color) =>
+        `<div class="hc-stat"><span class="hcs-l">${label}</span><span class="hcs-v"${color ? ` style="color:${color}"` : ''}>${value}</span>` +
+        (sub ? `<span style="font-size:0.6em;color:#667">${sub}</span>` : '') + `</div>`;
+
+    // Closing-window tyre health (backend-annotated from the same model the
+    // Tyre Degradation chart plots) tints each driver's row: green = plenty
+    // of tyre life left, yellow = worn, red = tyres essentially gone in the
+    // closing phase (the projection is extrapolating past realistic stint
+    // life).  Grey = no tyre data for that driver.
+    const cols = 'grid-template-columns:64px 56px 96px 120px 120px 1fr 190px;';
+    const rows = sessions.map(s => {
+        const h = s.closing_tyre_health_pct;
+        const tint = h == null ? null
+            : h >= 60 ? 'rgba(0,200,83,0.10)'
+            : h >= 30 ? 'rgba(255,215,0,0.10)'
+            : 'rgba(255,107,107,0.14)';
+        const edge = h == null ? ''
+            : `border-left:3px solid ${h >= 60 ? '#00c853' : h >= 30 ? '#ffd700' : '#ff6b6b'};`;
+        const healthCell = h == null
+            ? '<span style="color:#667">—</span>'
+            : `<span style="color:${h >= 60 ? '#00c853' : h >= 30 ? '#ffd700' : '#ff6b6b'}" ` +
+              `title="tyre health at the closing-phase start (L${s.closing_phase_start_lap ?? ''}) — same model as the Tyre Degradation chart">` +
+              `${Math.round(h)}% ${bmEsc(s.closing_tyre_compound || '')}${s.closing_tyre_age != null ? '·age' + Math.round(s.closing_tyre_age) : ''}</span>`;
+        return `<div class="tbl-row" style="${cols}${tint ? 'background:' + tint + ';' : ''}${edge}">` +
+            `<span>${s.driver_code}</span>` +
+            `<span>L${s.laps}</span>` +
+            `<span>${Number(s.pace_s_per_mj).toFixed(4)}</span>` +
+            `<span style="color:#00c853">${Number(s.closing_phase_improvement_s).toFixed(2)}s</span>` +
+            `<span style="color:#00c853">${Number(s.full_race_improvement_s).toFixed(2)}s</span>` +
+            `<span>${s.strategy_mode} vs ${s.flat_out_mode}</span>` +
+            healthCell + `</div>`;
+    }).join('');
+
+    let html =
+        `<div class="hc-stats" style="gap:34px;margin-bottom:14px">` +
+        stat('CLOSING PHASE · final ' + (cfg.closing_laps || 15) + ' laps',
+            (closeMean >= 0 ? '+' : '') + closeMean.toFixed(2) + 's',
+            'mean across ' + sessions.length + ' drivers' + (hasDeck ? ' · deck claims −1.8s' : ''),
+            closeMean < 0 ? '#00c853' : '#ff6b6b') +
+        stat('FULL RACE',
+            (fullMean >= 0 ? '+' : '') + fullMean.toFixed(2) + 's',
+            hasDeck ? 'strategy − flat-out · deck number is conservative' : 'strategy − flat-out',
+            fullMean < 0 ? '#00c853' : '#ff6b6b') +
+        (hasDeck
+            ? stat('DECK CLAIM',
+                reproduced ? 'REPRODUCED ✓' : 'MISSED ✗',
+                '|−1.8 − closing mean| < 0.25s',
+                reproduced ? '#ffd700' : '#ff6b6b')
+            : '') +
+        `</div>` +
+        `<div class="tbl-wrap"><div class="tbl-row tbl-head" style="${cols}">` +
+        `<span>DRIVER</span><span>LAPS</span><span>PACE</span><span>CLOSING</span><span>FULL RACE</span><span>PAIRING</span><span>TYRE HEALTH @ CLOSING</span></div>${rows}</div>` +
+        `<div class="chart-note" style="margin-top:10px">Row tint = that driver's tyre health at the closing-phase start (green ≥60% · yellow 30–60% · red &lt;30% · grey = no data) — the same Pirelli-style model the main dashboard's <b>Tyre Degradation</b> chart plots, so the two panels share one health timeline. Red rows mean the strategy projection is extrapolating past realistic stint life in the closing window.</div>` +
+        (genAt
+            ? `<div class="chart-note" style="margin-top:10px">Artifact generated ${genAt} · ${(data.meta && data.meta.script) || 'scripts/benchmark_energy_strategy.py'} · deterministic — same DB yields the same numbers, so the figure above is the script's own output.</div>`
+            : '');
+    out.innerHTML = html;
+    if (meta) meta.textContent = src.artifact ? ('artifact ' + src.artifact + (src.mtime_iso ? ' · ' + src.mtime_iso : '')) : '';
+
+    // Cumulative per-lap improvement (strategy − flat-out) for the first
+    // driver, split at the closing-phase window so the deck window is visible.
+    const first = sessions[0];
+    if (first && first.per_lap && first.per_lap.lap && window.Chart) {
+        const laps = first.per_lap.lap;
+        const strat = first.per_lap.credits[first.strategy_mode];
+        const flat = first.per_lap.credits[first.flat_out_mode];
+        if (strat && flat && strat.length === laps.length) {
+            const cum = [];
+            let acc = 0;
+            for (let i = 0; i < laps.length; i++) { acc += flat[i] - strat[i]; cum.push(+acc.toFixed(3)); }
+            const closeLaps = cfg.closing_laps || 15;
+            drawBmEnergyChart(laps, cum, laps[laps.length - closeLaps] || laps[0], first.driver_code, closeLaps);
+        }
+    } else {
+        const card = document.getElementById('bm-energy-chart-card');
+        if (card) card.style.display = 'none';
+    }
+}
+
+function drawBmEnergyChart(laps, cum, closeStartLap, driver, closeLaps) {
+    const card = document.getElementById('bm-energy-chart-card');
+    const canvas = document.getElementById('bmEnergyChart');
+    if (!card || !canvas) return;
+    const closeIdx = laps.findIndex(l => l >= closeStartLap);
+    const pre = cum.map((v, i) => (closeIdx < 0 || i < closeIdx) ? v : null);
+    const win = cum.map((v, i) => (closeIdx >= 0 && i >= closeIdx) ? v : null);
+    if (bmEnergyChart) bmEnergyChart.destroy();
+    bmEnergyChart = new Chart(canvas.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: laps,
+            datasets: [
+                { label: 'Race body', data: pre, borderColor: '#9aa', borderDash: [4, 3], pointRadius: 0, tension: 0.2 },
+                { label: 'Closing phase (final ' + closeLaps + ' laps)', data: win, borderColor: '#ffd700', borderWidth: 2, pointRadius: 0, tension: 0.2 },
+            ],
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#ccc', font: { family: 'Share Tech Mono', size: 11 } } },
+                tooltip: { callbacks: { label: c => 'Δ ' + c.parsed.y.toFixed(2) + 's' } },
+                title: {
+                    display: true,
+                    text: driver + ' · cumulative race-time improvement (strategy − flat-out)',
+                    color: '#eee', font: { family: 'Barlow Condensed', size: 14, weight: '700' },
+                },
+            },
+            scales: {
+                x: { title: { display: true, text: 'Lap', color: '#99a' }, ticks: { color: '#99a' }, grid: { color: '#ffffff0d' } },
+                y: { title: { display: true, text: 'cumulative Δ (s)', color: '#99a' }, ticks: { color: '#99a' }, grid: { color: '#ffffff0d' } },
+            },
+        },
+    });
+    card.style.display = 'block';
+}

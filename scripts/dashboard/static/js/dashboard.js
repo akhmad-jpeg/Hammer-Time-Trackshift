@@ -49,9 +49,33 @@ function initCharts() {
     });
 
     const tyreCtx = document.getElementById('tyreChart').getContext('2d');
+    // Gold pit-window band: teams pit with ~40-50% of a set's life left
+    // (1-2 laps before the performance cliff), so the band marks where a
+    // stint should end on the health axis.  Drawn as a custom plugin — the
+    // CDN build has no annotation plugin loaded.
+    const pitWindowBand = {
+        id: 'pitWindowBand',
+        beforeDatasetsDraw(chart, args, opts) {
+            const y = chart.scales.y;
+            const area = chart.chartArea;
+            if (!y || !area) return;
+            const yTop = y.getPixelForValue(50);
+            const yBot = y.getPixelForValue(40);
+            const ctx = chart.ctx;
+            ctx.save();
+            ctx.fillStyle = 'rgba(255, 215, 0, 0.07)';
+            ctx.fillRect(area.left, yTop, area.width, yBot - yTop);
+            ctx.fillStyle = 'rgba(255, 215, 0, 0.55)';
+            ctx.font = "9px 'Share Tech Mono', monospace";
+            ctx.textAlign = 'left';
+            ctx.fillText('PIT WINDOW', area.left + 4, yBot - 3);
+            ctx.restore();
+        }
+    };
     tyreChart = new Chart(tyreCtx, {
         type: 'line',
         data: { labels: [], datasets: [] },
+        plugins: [pitWindowBand],
         options: {
             responsive: true, maintainAspectRatio: false, animation: false,
             plugins: {
@@ -61,29 +85,25 @@ function initCharts() {
                         title: items => items.length ? `Race Lap ${items[0].label}` : '',
                         label: ctx => {
                             if (ctx.parsed.y === null || ctx.parsed.y === undefined) return '';
-                            const lapNum = ctx.label;
-                            const lap = _currentLapsByNum[lapNum];
-                            const delta = ctx.parsed.y;
-                            const sign = delta >= 0 ? '+' : '';
-                            let ageStr = '';
-                            if (lap && lap.tyre_age !== undefined && lap.tyre_age !== null) {
-                                ageStr = ` (Age ${lap.tyre_age} lap${lap.tyre_age === 1 ? '' : 's'})`;
-                            }
-                            let rawStr = '';
+                            const lap = _currentLapsByNum[ctx.label];
+                            const health = ctx.parsed.y;
+                            let comp = '', ageStr = '';
                             if (lap) {
-                                const raw = lap.lap_time !== undefined && lap.lap_time !== null ? lap.lap_time : lap.avg_lap_time;
-                                if (raw !== undefined && raw !== null) { rawStr = ` - raw ${fmtTime(parseFloat(raw))}`; }
+                                if (lap.tyre_compound) comp = ` ${lap.tyre_compound}`;
+                                if (lap.tyre_age !== undefined && lap.tyre_age !== null) {
+                                    ageStr = ` · age ${lap.tyre_age} lap${lap.tyre_age === 1 ? '' : 's'}`;
+                                }
                             }
                             const scrub = (lap && lap.is_valid !== undefined && lap.is_valid != 1) ? ' scrubbed' : '';
-                            const pitTag = (lap && lap.is_pit_lap) ? ((lap.has_pit_stop == 1) ? ' pit in' : ' pit out') : '';
-                            return `  ${ctx.dataset.label}: ${sign}${delta.toFixed(2)}s${ageStr}${rawStr}${scrub}${pitTag}`;
+                            const pitTag = (lap && lap.is_pit_lap) ? ((lap.has_pit_stop == 1) ? ' · pit in' : ' · pit out') : '';
+                            return `  Tyre Health ${health.toFixed(0)}%${comp}${ageStr}${scrub}${pitTag}`;
                         }
                     }
                 }
             },
             scales: {
                 x: { ...CHART_SCALE, title: { display: true, text: 'RACE LAP', color: '#888', font: { family: "'Share Tech Mono',monospace", size: 10 } } },
-                y: { ...CHART_SCALE, beginAtZero: false, title: { display: true, text: 'DELTA VS STINT TREND (S)', color: '#888', font: { family: "'Share Tech Mono',monospace", size: 10 } } }
+                y: { ...CHART_SCALE, beginAtZero: true, title: { display: true, text: 'TYRE HEALTH (%)', color: '#888', font: { family: "'Share Tech Mono',monospace", size: 10 } } }
             }
         }
     });
@@ -300,6 +320,8 @@ async function loadTyreChart(id) {
 
         noData.style.display = 'none';
         canvas.style.display = 'block';
+        const legendEl = document.getElementById('tyreLegend');
+        if (legendEl) legendEl.style.display = 'flex';
         document.getElementById('tyreChartNote').style.display = 'block';
 
         const laps = data.slice().sort((a, b) => (parseInt(a.lap_number) || 0) - (parseInt(b.lap_number) || 0));
@@ -344,8 +366,8 @@ async function loadTyreChart(id) {
             let lap = null;
             for (const stint of stints) { if (stint.lapMap[num]) { lap = stint.lapMap[num]; lapColor = TYRE_COLORS[stint.compound] || '#00d2be'; break; } }
             if (lap) {
-                const delta = parseFloat(lap.is_pit_lap ? lap.pit_delta : lap.stint_delta);
-                allData.push(isNaN(delta) ? null : delta);
+                const health = parseFloat(lap.tyre_health_pct);
+                allData.push(isNaN(health) ? null : health);
                 allStyles.push(lap.is_pit_lap ? 'rectRot' : 'circle');
                 allRadii.push(lap.is_pit_lap ? 8 : 4);
                 allBg.push(lap.is_pit_lap ? PIT_COLOR : lapColor);
@@ -357,29 +379,24 @@ async function loadTyreChart(id) {
             }
         });
         const datasets = [{
-            label: 'Stint Residuals', borderColor: '#00d2be', backgroundColor: 'transparent',
+            label: 'Tyre Health', borderColor: '#00d2be', backgroundColor: 'transparent',
             segment: { borderColor: (ctx) => { const n = allLapNumbers[ctx.p0DataIndex]; let c = '#00d2be'; for (const s of stints) { if (s.lapMap[n]) { c = TYRE_COLORS[s.compound] || '#00d2be'; break; } } return c; } },
+            // spanGaps:false so laps with no tyre data (health null) render
+            // as TRUE gaps instead of a bridged line — a hole in the tyre
+            // record must not look like rubber that stopped degrading (the
+            // fake flat lines from missing compound/age rows).
             borderWidth: 2, pointStyle: allStyles, pointRadius: allRadii, pointBackgroundColor: allBg,
-            pointBorderColor: allBg, pointHitRadius: 10, pointHoverRadius: 8, tension: 0.3, spanGaps: true, data: allData
+            pointBorderColor: allBg, pointHitRadius: 10, pointHoverRadius: 8, tension: 0.3, spanGaps: false, data: allData
         }];
 
         tyreChart.data.labels = allLapNumbers;
         tyreChart.data.datasets = datasets;
 
-        // Clamp y-axis to non-pit residual range so huge pit deltas
-        // (±20-40s) don't squash the ±0.5s band into invisibility.
-        // Pit diamonds still render but appear clipped at chart edges.
-        const allVals = [];
-        datasets.forEach(ds => ds.data.forEach((v, i) => {
-            if (v !== null && !isNaN(v) && ds.pointStyle[i] === 'circle') allVals.push(Math.abs(v));
-        }));
-        if (allVals.length > 2) {
-            allVals.sort((a, b) => a - b);
-            const q3 = allVals[Math.floor(allVals.length * 0.95)] || 3;
-            const yMax = Math.max(2, q3 * 1.3);
-            tyreChart.options.scales.y.min = -yMax;
-            tyreChart.options.scales.y.max = yMax;
-        }
+        // Fixed 0-100 health scale — health is bounded by construction, so no
+        // per-session clamping is needed; pit diamonds sit at their true
+        // health like every other lap (a stop resets the curve to ~100%).
+        tyreChart.options.scales.y.min = 0;
+        tyreChart.options.scales.y.max = 100;
 
         tyreChart.resize();
         tyreChart.update();

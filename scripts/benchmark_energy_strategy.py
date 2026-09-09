@@ -72,6 +72,7 @@ from energy_simulator import (
     PU_SPECS,
     _speed_drop_regen,
     project_energy_trace,
+    resolve_track_profile,
     spec_for_year,
 )
 
@@ -98,9 +99,14 @@ def load_energy_pace() -> dict:
 
 
 def track_pace_s_per_mj(track_name: str, energy_pace: dict) -> float:
-    """Measured per-track s/MJ, falling back to the flat constant."""
+    """Measured per-track s/MJ (name-robust), falling back to the flat constant.
+
+    Resolution is casefold + short/full-name alias aware (see
+    energy_simulator.resolve_track_profile), so every stored race uses its
+    measured profile instead of silently falling back to the flat constant.
+    """
     try:
-        pt = energy_pace.get('per_track', {}).get(str(track_name))
+        pt = resolve_track_profile(track_name, energy_pace.get('per_track', {}))
         if pt and pt.get('pace_s_per_mj'):
             return float(pt['pace_s_per_mj'])
     except Exception:

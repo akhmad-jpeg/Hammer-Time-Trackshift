@@ -1,0 +1,2206 @@
+================================================================================
+HAMMER TIME / F1 DIGITAL PIT WALL — FULL TECHNICAL Q&A
+Project: Trackshift "Hammer Time" by Team Underdogs
+(F1 telemetry + ML race-strategy platform: FastF1 import, MySQL, Flask dashboard,
+ lap-time ML, synthetic ERS energy model, Pirelli-style tyre model, dual-agent
+ overtake model, strategy advisor, benchmarks/backtests)
+Answers are brief but grounded in the actual code (scripts/*.py, database schema,
+ ml_models/ artifacts, backtests/ artifacts).
+================================================================================
+
+--------------------------------------------------------------------------------
+ARCHITECTURE
+--------------------------------------------------------------------------------
+
+1. What is the overall architecture of your system?
+   A three-layer stack. (1) INGESTION: FastF1-based importers (import_f1_race.py,
+   import_f1_dataset.py) pull historical F1 sessions into MySQL; a live UDP
+   listener (capture_telemetry.py) ingests F1 2017/2018 game telemetry.
+   (2) LOGIC/ML: a feature pipeline (feature_pipeline.py), lap-time model trainer
+   (ml_lap_predictions.py), overtake trainer (ml_overtake_predictions.py), a
+   synthetic ERS energy simulator (energy_simulator.py), a Pirelli-style tyre
+   model (tyre_degradation.py + measure_tyre_wear.py), stint analysis
+   (stint_analysis.py) and the inference APIs (overtake_inference.py,
+   driver_comparison.py). (3) PRESENTATION: a Flask + Chart.js dashboard
+   (dashboard.py, dashboard.html) served on localhost:5000 (Waitress in
+   production via run_server.py).
+
+2. Why did you choose your current backend architecture?
+   It is a simple, testable "import → train → serve" pipeline: Python end to end
+   (FastF1, pandas, scikit-learn, Flask are all in the same ecosystem), a
+   relational store for join-heavy telemetry queries, and a thin Flask API over
+   pre-trained artifacts so the UI never retrains. The launchers/ one-click
+   scripts make the whole flow reproducible on a fresh machine.
+
+3. Why did you choose MySQL/SQLite?
+   MySQL is used for the application database because the deck targets a
+   client-server pit-wall setup with join-heavy queries over sessions/laps/
+   telemetry and concurrent access (mysql-connector-python, schema in
+   database/f1_strategy.sql). SQLite appears only as the FastF1 HTTP cache
+   (f1_cache/fastf1_http_cache.sqlite) — a local key/value cache for API
+   responses, which is what it is good at.
+
+4. What are the main database tables?
+   sessions (one per driver per race/session), laps (one row per lap with time,
+   sectors, tyre compound/age, fuel, validity), telemetry (per-sample rows:
+   speed, throttle, brake, gear, rpm, drs), drivers, strategy_events
+   (PitStop/SafetyCar/VSC/RedFlag), race_state (the synthetic ERS battery
+   trace), plus tracks, track_aliases, seasons, regulations and data_sources.
+
+5. Why is race_state necessary?
+   F1 does not broadcast battery state-of-charge, so the ERS trace cannot be
+   read from any feed. race_state holds the SYNTHETIC per-lap battery columns
+   (energy_start_mj / energy_deployed_mj / energy_harvested_mj / energy_end_mj)
+   written by energy_simulator.py. It is a scenario overlay for the strategy /
+   what-if layers and is explicitly NOT ground truth — the lap-time ML model
+   must not be trained on it.
+
+6. How are sessions, laps, telemetry, and race_state related?
+   sessions has one row per driver per race (session_id). laps link to a
+   session via session_id (plus driver_id), one row per lap_number. telemetry
+   links to laps via lap_id — multiple sample rows per lap. race_state links
+   to (session_id, driver_id, lap_number) and adds the synthetic ERS columns
+   per lap.
+
+7. Why do you store telemetry at the lap level rather than only storing raw telemetry?
+   The FastF1 importer stores a light sample (~6 speed/throttle/brake rows per
+   lap) instead of the full 110 Hz stream. That keeps the DB small, keeps
+   queries fast, and gives the energy model what it needs (speed drops for
+   regen estimation, throttle for deployment weights). Raw full-rate telemetry
+   for many races would be gigabytes per weekend.
+
+8. How do you prevent duplicate race/session imports?
+   The importers resolve tracks through get_or_create_track() (shared with the
+   live capture) and sessions are keyed by track/date/driver; the comparison
+   code defensively picks the best session per driver per (year, track) — most
+   timed laps, tie-broken by latest date — so re-imports never produce two
+   divergent views of the same race.
+
+9. How do you handle missing telemetry?
+   Defensively, everywhere. Laps without samples simply carry an empty
+   telemetry list; the energy regen estimator falls back to REGEN_FALLBACK_MJ
+   when no speed drop is detectable; energy_diff in the overtake model is
+   imputed to 0.0 for races without a stored ERS trace (and the imputation
+   count is recorded); sector times fall back to per-track measured splits,
+   then equal thirds.
+
+10. How does your system handle a DNF?
+    A DNF driver's session simply has fewer timed laps; the import keeps the
+    session (comparison/calibration code reports rounds with missing timed
+    laps as error/skip rows rather than crashing), and pair-construction only
+    uses lap numbers where BOTH drivers have a lap. A driver with too few
+    clean laps is skipped by the per-driver model trainer (MIN_DRIVER_LAPS).
+
+11. How do you handle incomplete laps?
+    Lap time validity is gated by is_valid (FastF1 validity) plus a 60–180 s
+    window; the live capture inserts in-progress laps with lap_time_ms=0 and
+    is_valid=0 and only update_lap_time() can mark a completed lap valid, so a
+    mid-lap capture stop can never inflate averages or count as a fastest lap.
+    Training also drops laps outside 60–180 s (red flags, formation laps).
+
+12. How do you handle different F1 seasons with different regulations?
+    Two mechanisms. (1) The era bucket feature (era_18_20/21/22_23/24_26)
+    absorbs cross-season pace drift in the ML model. (2) The energy simulator
+    picks a PU spec per session year via spec_for_year(): the 2026 "newgen"
+    PU (350 kW MGU-K, 4 MJ store, 8.5 MJ/lap harvest cap) vs the 2014–2025
+    hybrid (120 kW, 4 MJ store, 2 MJ/lap cap) — a 2021 race is never simulated
+    with 2026 numbers.
+
+13. How would your architecture scale to the entire F1 historical dataset?
+    The design already copes: lap-level granularity bounds row counts, telemetry
+    is sampled (~6 rows/lap), models are trained on aggregated features, and
+    artifacts are joblib files loaded once. Scaling further would mean
+    partitioning by season, moving the FastF1 HTTP cache to object storage, and
+    training in a batch pipeline instead of a single script — the schema and
+    feature design do not change.
+
+14. What happens if two drivers have different numbers of available laps?
+    Pair-wise comparisons only score laps both drivers have; a DNF just ends
+    the shared window earlier. The per-driver model trainer requires ≥60 clean
+    laps or the driver gets no model; the race-call backtest requires ≥25 timed
+    laps per session and ≥8 common laps to score a pairing.
+
+15. How do you validate incoming telemetry?
+    Range checks at parse time (speed clamped 0–400 km/h, throttle/brake 0–1,
+    RPM 0–15000, gear −1..8, lap time 60–180 s window), validity flags from
+    FastF1/the game, SC/VSC/red-flag detection via session-relative lap-time
+    ratios PLUS speed gates (so slow-but-normal laps don't false-positive), and
+    pit detection via compound change or the in-pits flag with a slow lap.
+
+--------------------------------------------------------------------------------
+FASTF1 / DATA PIPELINE
+--------------------------------------------------------------------------------
+
+16. Why did you use FastF1?
+    It is the standard open-source Python library that wraps the official F1
+    timing feeds, giving laps, positions, pit stops, weather and sampled
+    telemetry for entire seasons with one API — exactly the historical dataset
+    a strategy platform needs, without scraping raw timing pages.
+
+17. What data does FastF1 actually provide?
+    Per-session: drivers, lap-by-lap times and validity, sector times, tyre
+    compound and tyre age, pit stop events, weather, and telemetry channels
+    (speed, throttle, brake, gear, RPM, DRS) at reduced sampling when requested.
+
+18. Which data comes directly from F1 timing data and which data is derived?
+    Lap times, sector times, validity, pit events, weather and tyre info come
+    from the official timing/API data. DERIVED/SYNTHETIC in this project:
+    fuel load (fuel_estimation.py: 110 − 2·lap), battery SOC (energy_simulator
+    synthesises it because F1 doesn't broadcast it), per-track tyre wear rates
+    (measured from stints, then blended with Pirelli research), and all ML
+    predictions themselves.
+
+19. How do you obtain lap times?
+    FastF1 lap objects carry lap_time; the importer writes lap_time_ms per lap
+    into the laps table. Live capture reconstructs lap time by tracking the
+    in-lap timer reset (a lap completes when the game's current_lap_time drops
+    below 1 s after being >10 s).
+
+20. How do you obtain tyre compound and tyre age?
+    FastF1 provides per-lap compound and tyre age; the importer normalises
+    compounds through TYRE_COMPOUND_MAP/normalize_compound() into the shared
+    enum (Soft/Medium/Hard/Intermediate/Wet/…). The live capture maps the
+    game's compound byte and counts tyre_age up one per lap, resetting to 1 on
+    a detected compound change.Stints are also reconstructed from compound changes / age resets in the
+   laps table (the tyre_stints table was dropped as never populated).
+
+21. How do you obtain sector times?
+    FastF1 provides sector1_ms/2/3_ms per lap, stored in laps. Laps imported
+    before sector capture fall back to the track's measured mean S1:S2:S3
+    share × lap time (equal thirds only when nothing is measured) — that
+    fallback is recorded in model_info.
+
+22. How do you obtain throttle, brake, speed, RPM, gear and DRS?
+    FastF1's sampled telemetry API for historical races (stored ~6 samples/lap);
+    the live UDP capture parses the F1 2017/2018 Legacy packet (speed in m/s
+    converted to km/h, throttle/brake 0–1, gear display+1 → −1..8, RPM, DRS
+    flag) and persists one sample every 60 packets (~1 Hz at 60 fps).
+
+23. How reliable is FastF1 telemetry?
+    Good for lap timing and race structure (it wraps official data), but
+    telemetry is known to have gaps/artefacts and no battery SOC; the project
+    treats channels as approximate: speed drops drive regen estimation, DRS is
+    used for context, and everything energy-related is labelled synthetic.
+
+24. What is the telemetry sampling resolution?
+    ~6 timestamp-less samples per lap for FastF1 imports (sample index is
+    treated as lap fraction); live capture persists every 60th packet (~1 Hz
+    from a 60 fps stream).
+
+25. Why are you sampling telemetry instead of storing every telemetry point?
+    Storage and query cost. A race weekend at 110 Hz per channel across 20
+    cars is enormous; ~6–30 samples/lap retains the shape of the trace (speed
+    drops, throttle regions) needed for regen estimation and energy modelling
+    at a fraction of the size.
+
+26. What information do you lose through telemetry sampling?
+    Fine braking traces (the regen estimator therefore scales raw kinetic-loss
+    sums by REGEN_SAMPLING_SCALE 2.2 and caps by regulation), exact sector
+    boundaries (sector shares are approximated from measured FastF1 splits),
+    and corner-level detail — the code is explicit that the ERS trace is
+    "crude but self-consistent", not ground truth.
+
+27. How do you deal with missing telemetry channels?
+    Each consumer degrades gracefully: energy uses speed only (brake is
+    useless at ~6 samples/lap), the sector sandbox uses speed+throttle with a
+    uniform-prior blend when samples can't resolve sectors, the corner
+    heatmap spreads probability flat when no braking evidence exists, and
+    comparisons simply omit telemetry aggregates for laps without rows.
+
+28. How do you normalize tyre compounds?
+    A shared TYRE_COMPOUND_MAP + normalize_compound() (in import_f1_race.py,
+    reused by capture_telemetry.py) maps every source's names onto one enum:
+    Hypersoft/Ultrasoft/Supersoft/Soft/Medium/Hard/Superhard/Intermediate/Wet.
+    The lap trainer strips and title-cases strings before one-hot encoding so
+    training and prediction see identical tokens.
+
+29. How do you identify pit stops?
+    Three ways: (1) FastF1 pit events → strategy_events (duration ≥15 s counts
+    as real); (2) tyre-age reset / compound change in the laps table (used by
+    stint detection and overtake pit-lap filtering); (3) live capture: live
+    compound byte change, or the in-pits flag plus a lap ≥15 s slower than the
+    rolling median. Pit in/out laps are excluded from training and pair
+    construction.
+
+30. How do you detect Safety Car and VSC periods?
+    In the live capture: SC = lap ≥130% of expected AND lap-average speed
+    <75% of recent; VSC = lap in [115%,130%) AND speed <90% of recent; red
+    flag = ≥200% AND speed <40% (absolute km/h fallbacks before speed history
+    exists). For historical data, the training pipeline uses a session-relative
+    lap-time ratio filter (>1.30× session median = SC/VSC/red-flag lap) since
+    those periods are stored session-wide with lap_id NULL.
+
+31. How do you distinguish real data from synthetic/derived data?
+    Explicitly and loudly. fuel_estimation.py, energy_simulator.py and the
+    tyre model docstrings all say "SYNTHETIC"/"NOT ground truth"; the UI labels
+    the battery chart "(synthetic ERS)"; benchmark artifacts record which
+    numbers are measured vs derived (e.g. pace_s_per_mj basis, sector_share
+    source, energy_diff imputed counts).
+
+32. How do you prevent leakage between training and testing data?
+    The training query drops pit in/out laps and SC/VSC laps, the split is
+    random by LAP (within-track) so consecutive laps of the same driver can
+    leak, which is acknowledged; the honest generalisation check uses
+    GroupShuffleSplit on session_id (whole unseen races) and stint-grouped
+    splits in benchmark_models.py (new stints, random effects = 0). The overtake
+    trainer splits by race and reports a group-held-out split for transparency.
+
+33. How do you handle different regulations across seasons?
+    Era buckets in the lap model (absorb pace drift) and PU-spec switching in
+    the energy simulator (spec_for_year). The regulations table in the schema
+    exists to store per-era limits; the code hard-codes the 2026 vs 2014–2025
+    numbers with the FIA citations in the simulator docstring.
+
+--------------------------------------------------------------------------------
+MACHINE LEARNING
+--------------------------------------------------------------------------------
+
+34. Which ML models are you using?
+    Lap time: LinearRegression vs RandomForestRegressor (winner by within-track
+    MAE; currently LinearRegression — smooth monotonic curves for the advisor)
+    plus per-driver and per-driver-per-year copies, and three sector regressors.
+    Overtake: a RandomForest closing-rate regressor + a LogisticRegression
+    classifier for P(overtake) (class_weight='balanced'). Driver comparison:
+    the per-driver models' predicted-time deltas with a paired t-test. Strategy:
+    a DP stint optimizer over the tyre model, not a learned model.
+
+35. Why did you choose those models?
+    Linear regression for lap time because the deck requires smooth, monotonic,
+    explainable degradation curves (a forest produces staircase artefacts) and
+    the strategy advisor reads the age curve; RandomForest as the accuracy
+    challenger. Logistic regression for overtake probability because it is a
+    calibrated binary classifier with interpretable coefficients; the RF
+    regressor for closing rate because it beat LR on within-race MAE.
+
+36. What is your target variable?
+    Lap time in seconds (lap_time_ms/1000) for the lap model; S1/S2/S3 seconds
+    for the sector models; per-lap closing rate (seconds gained by the chaser)
+    and binary overtake (0/1) for the overtake heads.
+
+37. What are your input features?
+    tyre_age; one-hot tyre_<compound>, track_<name>, phase_<0..3> (absolute
+    lap-number buckets), era_<bucket>; interactions tyre_age:tyre_<c> and
+    (global model) tyre_age:track_<t>. Overtake adds gap_before_s, pace_gap_s,
+    chaser_age_minus_leader, chaser_tyre_advantage, fuel_diff_kg,
+    energy_diff_mj and the same phase/era/track one-hots.
+
+38. Why are those features relevant?
+    tyre_age and compound capture wear; track captures circuit character;
+    race-phase buckets absorb the fuel/race-phase level of a stint (so the
+    compound intercepts aren't confounded by when each compound is raced);
+    era absorbs car/regulation pace drift; interactions let each compound (and
+    track) have its own wear slope; the overtake features are exactly the
+    head-to-head context a strategist reasons about (gap, pace edge, tyre,
+    fuel, ERS).
+
+39. How did you engineer the features?
+    pd.get_dummies one-hot encoding after normalising strings, race-phase and
+    era buckets mapped from lap_number / session year, then tyre_age × one-hot
+    interaction columns (tyre_age:tyre_<c> equals tyre_age on that compound
+    and 0 elsewhere). construct_prediction_input builds an aligned zero-row at
+    prediction time so unseen values become clean zeros instead of missing
+    columns.
+
+40. How did you split your training and testing data?
+    80/20 random split (train_test_split, random_state 42) for the deployment
+    "within-track" metric; GroupShuffleSplit on session_id for the
+    "unseen-track" informational metric; stint-grouped splits in
+    benchmark_models.py; the overtake trainer uses the same 80/20 pattern plus
+    a group-held-out race split.
+
+41. Did you use a random split or a chronological split?
+    Random split for the main metric; session-grouped (≈chronological in that
+    whole later races are held out) for the generalisation check. A pure
+    chronological split would be the most honest for deployment and is
+    recommended as an upgrade; the code documents that unseen-track R² is
+    expected to be poor and that the API rejects unseen tracks by design.
+
+42. Why is a chronological split more appropriate for F1?
+    Because F1 is non-stationary: cars, tyres, and regulations change yearly,
+    and a model trained on 2020–2024 predicting 2026 must extrapolate. A
+    chronological split measures that forward-generalisation honestly instead
+    of letting randomly interleaved laps hide it. The era bucket is the
+    mitigation for the largest drift.
+
+43. How do you prevent the model from memorizing a circuit?
+    The model is explicitly a within-track model: the API rejects unseen
+    tracks/tyres with a clear error rather than predicting on an all-zero
+    row, and the unseen-track metric is reported so the memorisation ceiling
+    is visible. Per-driver models only cover tracks the driver actually raced.
+
+44. How do you handle unseen circuits?
+    Reject them at the API/CLI boundary (validate_model_inputs) with a message
+    listing the covered set. The overtake model instead returns
+    track_covered=False so callers can fall back to the pace-gap-only heuristic
+    rather than trusting an all-zero-row prediction.
+
+45. How do you handle unseen drivers?
+    No per-driver model → the comparison/tooling reports "no model" with
+    instructions to train (FileNotFoundError with a clear message). The global
+    lap model doesn't need the driver (driver identity is only in per-driver
+    models).
+
+46. How do you handle a driver with insufficient historical data?
+    The trainer skips drivers below MIN_DRIVER_LAPS (60 clean laps) for
+    per-driver models and below 60 for per-driver-per-year models; the UI
+    lists coverage (laps/tracks/tyres) so the user sees why a driver isn't
+    comparable.
+
+47. How do you handle different tyre compounds?
+    One-hot tyre_<compound> terms with per-compound age interactions, so each
+    compound has its own intercept and wear slope; unseen compounds are
+    rejected; wet compounds (Intermediate/Wet) are handled by the same
+    machinery with their own rates in the tyre model.
+
+48. How do you handle tyre age?
+    tyre_age is the only continuous time-varying feature. Within-track its
+    fitted slope is treated as fuel burn (detrended out of comparisons); the
+    tyre DEGRADATION layer (per-compound measured/researched rates + cliff)
+    is added on top so age matters the way it should in strategy decisions.
+
+49. How do you account for fuel load?
+    Via the race-phase buckets (the fuel LEVEL of a stint) in the model, and
+    via explicit fuel-burn detrending (fuel_burn_rate = min(0, tyre_age
+    coefficient)) in the strategy advisor and energy what-if. The fuel column
+    itself is synthetic (110 − 2·lap) and identical across tracks, so it is a
+    race-progress proxy, not a real sensor.
+
+50. How do you account for weather?
+    Weakly. The sessions table stores a Dry/Wet/Mixed label; the strategy
+    advisor uses an explicit Rain event with RAIN_PACE_DELTA (slicks ~3 s/lap
+    off Inters); wet compounds have their own tyre rates. There is no weather
+    feature in the lap-time ML model yet — a documented gap (track temps, rain
+    intensity are not features).
+
+51. How do you account for Safety Cars?
+    As exclusions: SC/VSC/red-flag laps (>1.30× session median) are dropped
+    from training; the strategy advisor models the pit-loss discount of
+    stopping under VSC (~18 s), SC (~14 s) and red flag (free); the race-call
+    backtest ends segments at pit stops and treats SC compression as real
+    convergence.
+
+52. How do you account for traffic?
+    Only implicitly (outlier laps are dropped) plus an explicit "rejoin
+    traffic" pit-loss multiplier (Clear 0.95 / Light 1.0 / Heavy 1.25) in the
+    advisor. There is no traffic/dirty-air feature in the ML models.
+
+53. How do you account for track evolution?
+    Not as a feature. It is absorbed into the era bucket and into per-stint
+    trends; the code acknowledges stints carry traffic, SCs and evolution,
+    which is why per-track wear is measured RELATIVE (rank) and shrunk, not
+    taken at face value.
+
+54. How do you account for qualifying vs race pace?
+    The platform is race-focused: sessions store session_type and the trainers
+    filter to race laps (overtake pairs are built from 'Race' sessions);
+    qualifying laps are simply not in the training sets.
+
+55. What metrics did you use to evaluate the model?
+    Lap/sector models: MAE, RMSE, R² (MAE is the selection metric). Overtake:
+    closing-rate MAE/RMSE/R²; classifier AUC, accuracy, precision, recall.
+    Comparison: per-track delta means with a paired t-test (p, t, verdict).
+    Benchmarks: closing-phase/full-race time deltas vs baselines, gap-trajectory
+    MAE/bias, precision/recall on window/pass calls, calibration buckets.
+
+56. Why did you choose MAE/RMSE/R²/AUC?
+    MAE is lap-time error in the units a strategist uses (seconds) and is
+    robust for selection; RMSE penalises big misses; R² gives the variance-
+    explained headline; AUC is threshold-free for a rare-event classifier
+    (overtakes are ~1.2% of battle laps) — but the project also reports
+    precision/recall because AUC hides the cost of a false positive.
+
+57. What does your model's error actually mean in race conditions?
+    Within-track MAE 1.609 s/lap means a predicted lap time is typically ~1.6 s
+    off — a few tenths on a good track, more on noisy ones. In race terms that
+    is the difference between a front-row and a midfield car, so the model is
+    used for RELATIVE comparisons (stay out vs pit, driver A vs B) where the
+    shared error largely cancels, not for absolute predictions.
+
+58. What is the baseline model?
+    The deployed LinearRegression is itself the primary baseline compared
+    against RandomForest and, in benchmark_models.py, against statsmodels
+    mixed models (random track intercepts; random stint intercept+slope) and
+    tree baselines. The energy benchmark uses "Flat-Out" (push mode) as the
+    human baseline.
+
+59. Does your model outperform the baseline?
+    On within-track MAE the linear model wins on the current data
+    (model_info.json: MAE 1.609, R² 0.932) and is preferred for smoothness;
+    benchmark_models.py shows the mixed models are competitive/interesting on
+    known tracks and the honest deployment comparison (new stints) is what the
+    advisor actually faces. The energy strategy beats Flat-Out on every stored
+    race in the fleet sweep.
+
+60. How do you know your model generalizes?
+    Three checks: within-track holdout (the deployment case), session-grouped
+    unseen-track (reported, expected poor, drives the reject-unseen design),
+    and stint-grouped new-stint evaluation in benchmark_models.py. The race-call
+    backtest and season calibration scans additionally validate the deployed
+    system against real races.
+
+61. What are the biggest sources of model error?
+    (1) Within-stint fuel vs wear confounding (both linear in lap number);
+    (2) no weather/track-temp/traffic features; (3) sparse per-driver samples
+    (~1 s model noise); (4) coarse telemetry sampling; (5) one-hot track
+    structure that cannot generalise to new circuits; (6) the overtake model's
+    tiny positive class (26 overtake labels).
+
+62. What happens when the model is wrong?
+    The UI surfaces uncertainty honestly: MAEs and significance verdicts are
+    shown, unseen inputs are rejected, calibration trust tiers flag low-trust
+    races, and the backtest reports precision/recall so an over-eager "pass"
+    call is visible. The design intent is a decision-support tool — the human
+    makes the final call.
+
+63. How would you calibrate the model?
+    For the classifier, Platt/isotonic calibration on held-out races and
+    recalibrating the pass threshold from calibration buckets (the project
+    already did this: LIVE_PASS_CUM raised 0.5 → 0.8 after the backtest
+    showed P≥0.8 has a 24.7% real pass rate vs 12.9% for [0.5,0.8)). For the
+    regressor, bias-correction per track/compound and conformal intervals.
+
+64. How would you explain an ML prediction to an engineer?
+    For the linear model, literally: predicted = intercept + (per-track
+    intercept) + (per-compound intercept) + tyre_age·(slope) + phase/era
+    terms — so "on this circuit, this compound, at this age, the model expects
+    X seconds, of which Y is the track level, Z the compound offset and W·age
+    the age effect (mostly fuel, detrended)". Feature importances and the
+    age-response probe exist for the forest variant.
+
+65. Is your model causal or predictive?
+    Predictive with physics priors, not causal. The lap model is a regression
+    for E[lap_time | features]; the tyre model is a causal-style structural
+    curve (wear causes slower laps) layered on top; the energy model is a
+    physical simulator. The code is explicit that within a stint fuel and wear
+    cannot be separated from data alone — the separation is an assumption.
+
+66. Can your model determine *why* a driver is faster?
+    Only at the level of its features: it can say the gap comes from the
+    intercept difference (car+driver), compound, tyre age, phase or era — not
+    *why* the driver is faster (driving line, brake balance, setup). The
+    driver comparison explicitly warns that cross-team gaps mix driver AND car
+    performance.
+
+--------------------------------------------------------------------------------
+OVERTAKING
+--------------------------------------------------------------------------------
+
+67. How do you define an overtake?
+    An on-track position swap reconstructed from cumulative race clocks: if
+    the chaser is behind at lap L−1 (|gap| > 0) and ahead at L, and the swap
+    started from within 5 s (OVERTAKE_GAP_MAX_S), it is labelled an overtake
+    (pit in/out laps, warm-up laps and SC laps excluded). The backtest uses
+    the same rule: an order flip across a single RACING lap from a small gap.
+
+68. What features determine your overtake probability?
+    gap_before_s, pace_gap_s (leader predicted − chaser predicted lap time),
+    chaser_age_minus_leader, chaser_tyre_advantage (compound speed order),
+    fuel_diff_kg, energy_diff_mj, plus race-phase, era and track one-hots.
+
+69. Why use a logistic model for overtake probability?
+    Because the target is binary (passed or not), a logistic model gives a
+    calibrated probability, is fast, and with class_weight='balanced' copes
+    with the ~1.2% positive rate. AUC 0.977 on held-out battle laps, though
+    precision (0.30) is honestly reported.
+
+70. What does P0 represent?
+    P0 is the single-lap dual-agent model: given both drivers' context entering
+    a lap, predict (a) the closing rate in seconds and (b) the probability the
+    chaser passes that lap. It is the "one-lap head-to-head" inference unit
+    the P1 simulator and the live Race Call are built on.
+
+71. What does P1 represent?
+    P1 is the whole-race simulator (simulate_full_race): it replays two
+    drivers' real race sessions lap by lap, reading every P0 feature from the
+    database, aligning the intra-lap gap movement to the two speed traces, and
+    splitting each lap's overtake probability into S1/S2/S3 shares weighted by
+    where the chaser gains and where braking evidence sits. A pass fires when
+    the per-lap probability crosses 0.5 and roles swap.
+
+72. How do you calculate closing rate?
+    From the cumulative race clocks: closing_rate = gap_before − gap_after for
+    the lap (positive = chaser gains). The model predicts that value from the
+    paired features; the P1 sim then shapes the within-lap path with the speed
+    traces so the segments sum exactly to the predicted closing rate.
+
+73. How do you distinguish genuine closing from noisy lap-time differences?
+    The trainer only counts battle laps (gap ≤10 s) and trusted overtake labels
+    (swap from ≤5 s), drops pit/SC/warm-up laps, and requires both drivers'
+    valid laps at L−1 and L. The backtest additionally scores sign-agreement
+    and sign-FLIP laps (where model direction contradicts real deltas) and a
+    net-direction check, so "closing" claims are validated against reality.
+
+74. How do you model DRS?
+    Directly: not at all in the ML features. Indirectly, DRS shows up in the
+    stored speed traces (the segment gains during full-throttle/straight
+    stretches) and in the corner heatmap's braking evidence. Adding a DRS
+    state feature is listed as a future improvement.
+
+75. How do you account for dirty air?
+    Implicitly only — dirty air makes following cars slower, which shows up in
+    the speed-trace alignment (corner losses for the chaser) and in the gap
+    walk, but there is no explicit dirty-air/downforce-loss feature. This is a
+    documented limitation.
+
+76. How do you account for tyre advantage?
+    Two explicit features: chaser_tyre_advantage (compound speed order:
+    Hypersoft>…>Wet, so a softer chaser scores >0) and chaser_age_minus_leader
+    (negative = fresher chaser). Both enter the closing and overtake models.
+
+77. How do you account for fuel advantage?
+    fuel_diff_kg = chaser fuel − leader fuel at lap start (negative = lighter
+    chaser) is a P0 feature. In the P1 replay it is read from each lap's stored
+    fuel_load.
+
+78. How do you account for ERS advantage?
+    energy_diff_mj = chaser SOC − leader SOC entering the lap, read from
+    race_state; imputed 0.0 when no synthetic ERS trace exists (879 of 1203
+    pair rows were imputed — recorded). The feature is clipped to the trained
+    domain [−2.0, +0.6] MJ because the closing regressor extrapolates badly
+    beyond it.
+
+79. How do you determine the probability of an overtake?
+    The logistic overtake_model scores a feature row built from the head-to-
+    head context (predict_proba → class-1 probability). It is only evaluated
+    inside the attack window (~1.2 s) in the live call, because that is where
+    the P0 signal actually lives.
+
+80. Why is 50% used as the overtake threshold?
+    RACE_TRIGGER_PROB = 0.5 is the per-lap pass trigger in the full-race
+    simulator — a simple, explainable default (probability over half ⇒ call
+    the pass). The LIVE call instead accumulates probability as a hazard and
+    uses a cumulative target of 0.8, which the backtest showed is better
+    calibrated.
+
+81. How do you determine the likely lap of an overtake?
+    In the live call, by accumulating the per-lap probabilities as a hazard:
+    cum = 1 − Π(1 − pᵢ) each lap inside the window; the lap where cum crosses
+    LIVE_PASS_CUM (0.8) is the projected pass lap. In the full-race replay, the
+    lap where per-lap P crosses 0.5.
+
+82. How do you determine the likely sector of an overtake?
+    The lap's probability is split into S1/S2/S3 weighted by where the chaser
+    is GAINING time that lap plus braking evidence (speed drops), because
+    passes happen at braking zones: sector weight = max(0, gain) + 0.5·brake.
+    The P1 sim also emits a 12-segment corner heatmap.
+
+83. What happens if the model predicts an overtake but the driver cannot physically pass?
+    The simulator keeps physics sane: gaps never go negative (clamped ≥0.05 s),
+    roles swap with a small residual gap instead of teleporting, the battle
+    ends if the gap blows open beyond 10 s, and a pass requires the probability
+    to cross the trigger. But single-track circuits with no overtake spot would
+    still over-predict — a real limitation the calibration tiers are meant to
+    expose.
+
+84. How would you distinguish an actual overtake from a pit-stop position change?
+    The trainer/backtest exclude pit in/out laps and only trust swaps from
+    inside 5 s; an undercut (strategy) is explicitly not scored as an on-track
+    pass — the backtest ends the comparison window at the next pit stop "because
+    an undercut/overcut is strategy, and this model only claims on-track
+    racecraft."
+
+85. How would you validate the overtake model against historical races?
+    Exactly what scripts/backtest_race_calls.py does: replay stored races
+    through the same live-call projection, drop checkpoints every N laps, and
+    score window prediction, pass prediction, gap-trajectory MAE/bias and
+    calibration buckets against what really happened (1942 checkpoints in the
+    densest run).
+
+86. What does your AUC actually tell you?
+    AUC 0.977 says the classifier ranks battle laps well — chaser-gain laps
+    with a swap get higher scores than non-swap laps. It does NOT say the
+    predicted probabilities are calibrated or that most "attack" calls are
+    correct; that's what precision/recall and calibration buckets are for.
+
+87. Is AUC sufficient to prove the model is good?
+    No — with a 1.2% positive rate, a model can have high AUC while almost
+    every positive call is wrong. That is why the project reports precision
+    (0.30) and recall (0.75), the calibration scan (real pass rate by P
+    bucket), and the backtest's TP/FP/FN/TN counts.
+
+88. What would precision/recall tell you about your overtake model?
+    Precision 0.30: ~30% of predicted passes actually happened (many false
+    alarms — why the pass threshold was raised). Recall 0.75: the model catches
+    ~75% of real passes. Together they show the trade-off: catching most passes
+    costs 2–3× as many false "attack" calls.
+
+89. How would you deal with the extremely small number of actual overtakes relative to battle laps?
+    Already partially done: class_weight='balanced', AUC selection, per-race
+    grouping so one race can't dominate, and threshold raising via calibration
+    buckets. Further steps: more seasons of data, SMOTE or synthetic pair
+    augmentation, cost-sensitive training, and reporting expected-value
+    (points lost/gained per call) instead of raw accuracy.
+
+--------------------------------------------------------------------------------
+ENERGY / ERS
+--------------------------------------------------------------------------------
+
+90. What is the purpose of your energy model?
+    To synthesize the one metric F1 doesn't broadcast — battery state-of-charge
+    — so the pit wall can reason about ERS deployment (push vs balanced vs
+    lift & coast), answer "if we push now, when does the battery die and what
+    does it cost at the flag?", and feed the energy_diff feature of the
+    overtake model.
+
+91. Is your battery data real or reconstructed?
+    Reconstructed/synthetic. The module is explicit: "F1 does not broadcast
+    battery state-of-charge … it has to be synthesised" and the rows are "a
+    scenario overlay … NOT ground truth".
+
+92. Why can't you directly obtain real F1 battery SOC from FastF1?
+    Because the FIA/Formula 1 do not publish energy store state in the timing
+    feeds. Teams get it from the car's own CAN data; public data only exposes
+    what the broadcast/API chooses, and SOC is not among it.
+
+93. What assumptions does your ERS model make?
+    (1) Kinetic-energy losses between sampled speed points estimate
+    regeneration; (2) a 10% management reserve protects the cell; (3) the
+    battery starts FULL at lights-out and burns down into a soft 30–80% band;
+    (4) SOC is tied to pace (faster laps spend, slower laps bank); (5) modes
+    differ in recovery discipline and deployment ceiling; (6) deployment is
+    worth the track's measured s/MJ at full-throttle share. All are crude but
+    self-consistent and regulation-shaped.
+
+94. What is the maximum usable energy store?
+    ES usable capacity = 4 MJ (100% SOC = 4 MJ, so 1% = 0.04 MJ), unchanged
+    between the 2014–2025 and 2026 PU eras per the cited regulations. With the
+    10% reserve the model never projects below 0.4 MJ.
+
+95. What is deployment?
+    Discharging the Energy Store through the MGU-K to add electrical power to
+    the drivetrain (in addition to the internal combustion engine) — the
+    "boost" that makes a car faster, usually on straights/acceleration zones.
+    Modelled per lap (MJ deployed) and bounded by the store and the era's
+    deployment rules (2026: store-limited bursts up to 8.5 MJ/lap; legacy: hard
+    4 MJ/lap quota).
+
+96. What is harvesting?
+    Regeneration — recovering kinetic energy under braking (and via lift-off/
+    part-throttle, and in 2026 super-clipping on-throttle recharge) through the
+    MGU-K and storing it in the ES. The model estimates it from speed drops and
+    caps it by the era's per-lap recharge limit (8.5 MJ/lap 2026; 2 MJ/lap
+    legacy).
+
+97. What is MGU-K?
+    The Motor Generator Unit–Kinetic, the electric motor/generator coupled to
+    the drivetrain: it deploys (motors) and recovers (generates) kinetic energy
+    — 120 kW in 2014–2025, 350 kW in the 2026 regs (250 kW outside acceleration/
+    overtaking zones after the May-2026 refinement).
+
+98. What is the relationship between braking and energy harvesting?
+    Braking converts kinetic energy to heat (and, with the MGU-K, to
+    electricity). Recovered energy = η·½·m·(v₁²−v₂²) across detected speed
+    drops, scaled up 2.2× to compensate for the coarse ~6 samples/lap, capped
+    by the per-lap harvest limit and by store headroom (a full battery can't
+    accept regen — surplus is wasted to the friction brakes).
+
+99. How do you estimate regeneration from telemetry?
+    _speed_drop_regen: for each consecutive sample pair where speed falls, add
+    0.5·mass·(v_i² − v_{i+1}²)·0.8 (80% efficiency), sum, scale by 2.2 for
+    under-sampling, cap at the era harvest limit (fallback 5 MJ when no drop is
+    detected).
+
+100. How do you estimate energy deployment?
+    It is a management policy per mode, not measured: push asks the era's
+    deployment ceiling every lap; balanced/liftcoast ask a net SOC move per lap
+    (pace-coupled plus a gentle pull to the mode's SOC target). Deployment is
+    capped by the era ceiling and by what the store can carry above the
+    reserve; depleted laps re-deploy only 85% of available flow (the 2026
+    "yo-yo" low-band behaviour).
+
+101. How do you calculate battery SOC?
+    SOC is stepped lap by lap: start_mj − deployed + harvested = end_mj, with
+    deployment from a full store at lights-out, opening burn-down while above
+    the band, and a floor at the 10% reserve. Intra-lap, the per-lap anchors
+    are spread over the telemetry segments (deploy on throttle, harvest on
+    speed drops) bounded by the 120 kW flow and damped around the straight
+    start→end line.
+
+102. How do you prevent the simulated battery from exceeding physical limits?
+    Clamps everywhere: harvested ≤ min(regen·style, harvest limit, headroom =
+    capacity − (battery − deploy)); end ≤ capacity; battery never below
+    reserve by construction (deploy ≤ battery − reserve + harvested); net
+    SOC moves capped at ±1 MJ/lap; intra-lap points clamped to [reserve,
+    capacity].
+
+103. How do you model deployment limits?
+    request = min(ask, era deploy ceiling) and min(ask, available = battery −
+    reserve + h); if the ask exceeds availability the lap is energy-limited and
+    only FLOOR_REDEPLOY_FRACTION (0.85) of the available flow is delivered.
+
+104. How do you model harvesting limits?
+    h = min(raw_regen × regen_style, harvest_limit_era, RECOVER_FLOW_CAP 4 MJ,
+    headroom). Headroom matters: regen arriving into a full store is wasted to
+    the friction brakes (the reason the car starts full and burns down).
+
+105. What happens when the battery reaches its minimum reserve?
+    The car is energy-limited: it can't sustain the mode's demand, part of the
+    lap is spent re-charging (super-clipping / lift-off), only ~85% of the
+    available flow is redeployed, and the store slowly rebuilds and cycles in a
+    low band instead of pinning dead at zero — the "yo-yo" behaviour described
+    in 2026 race reporting. Feasibility checks use final > reserve + 0.05 MJ.
+
+106. What happens when the battery reaches maximum SOC?
+    It cannot accept more regen (headroom = 0), so surplus harvesting is wasted
+    to the friction brakes; the opening burn-down logic spends the excess above
+    the band ceiling rather than banking it (a full store "has nowhere for the
+    regen to go"), which is why the trace descends from ~100% over the first
+    laps.
+
+107. What is Balanced mode?
+    The default: recovery discipline 1.00, per-lap net-SOC control targeting
+    ~55% — spends roughly what the lap harvests, steering SOC gently back
+    toward the target (15% regain per lap) so the battery floats in a soft
+    30–80% band and never sits dead. It's the trace most races show.
+
+108. What is Push mode?
+    Aggressive: recovery discipline 0.85 (late braking wastes energy) and the
+    full deployment ceiling every lap — the store drains to the low band in a
+    lap or two, then the car lives energy-limited off recovery. This is the
+    deck's "fast now, slow later" paradox and the "Flat-Out" baseline in the
+    energy benchmark.
+
+109. What is Lift & Coast mode?
+    Conservative: early lift-off opens a longer regen window (+20% harvest,
+    regen_style 1.20) and the driver banks the battery toward ~90% as
+    insurance. On high-regen tracks it can be the fastest *feasible* strategy
+    in the benchmark (e.g. Red Bull Ring 2026).
+
+110. How does ERS deployment affect lap time?
+    Each MJ deployed is worth the track's measured seconds-per-MJ at full-
+    throttle share (anchor 0.35 s/MJ × FT share / fleet mean), so e.g. ~2 MJ
+    deployed on a balanced lap is worth ~0.5–0.7 s. Deployment arriving around
+    re-charge windows on energy-limited laps is only 70% effective.
+
+111. How do you convert MJ into seconds gained?
+    seconds = pace_s_per_mj(track) × deployed_mj × (0.70 if energy-limited
+    else 1.0), where pace_s_per_mj comes from ml_models/energy_pace.json
+    (measured per-track, alias/case aware; flat 0.35 fallback). The sandbox
+    uses per-sector values.
+
+112. Why is the energy model described as synthetic?
+    Because every quantity (regen from sampled speed, SOC from a policy, pace
+    credit from an anchor constant) is modelled, not measured. The code
+    says so in the module docstring, in race_state's purpose, and the UI's
+    chart note.
+
+113. How would you validate your energy model?
+    The project validates end-to-end: the energy strategy benchmark reproduces
+    the deck's −1.8 s Monaco claim (−1.88 s closing phase) as a deterministic
+    artifact, the fleet sweep benchmarks all 115 stored races, and a scheduled
+    drift check (check_energy_benchmark_drift.py) fails loudly if the numbers
+    move. True validation would need manufacturer SOC telemetry; a cheaper
+    proxy is cross-checking regen estimates against published per-track regen
+    figures.
+
+114. What would make your energy model production-ready?
+    Real per-lap SOC data (or a validated battery model), higher-rate
+    telemetry with brake-torque blending, verified deploy/harvest power curves
+    per PU, track-temperature and aero-loss terms, and recalibration of
+    s/MJ per track from measured lap-time deltas instead of the 0.35 anchor.
+
+115. How would you improve the energy model if you had real manufacturer telemetry?
+    Replace the synthetic scheduler with a fitted SOC dynamics model (state
+    space / GP on real SOC traces), learn per-driver deploy policies from
+    telemetry, calibrate s/MJ from observed lap-time deltas, and validate the
+    limited-lap effectiveness factor empirically.
+
+116. How does energy strategy interact with tyre strategy?
+    They share the pace budget: deploying ERS early can help an overtake or
+    cover a tyre disadvantage, but a drained battery plus a clapped tyre at the
+    flag is the worst case. The benchmark's "feasible mode" rule (finish above
+    the reserve) is exactly this interaction — the strategy layer won't pick a
+    mode that leaves the battery dead, and the tyre model prices staying out.
+    The platform doesn't yet jointly optimise energy × tyres (a stated next
+    step).
+
+117. How does energy strategy interact with overtaking?
+    Through energy_diff_mj, a P0 overtake feature: a chaser with more stored
+    energy than the leader has a higher predicted closing rate/pass probability.
+    The full-race replay re-scores races under different ERS modes and
+    asymmetric duels (leader Balanced vs chaser Push) to show how deployment
+    choices shift the corner pass probabilities.
+
+118. Can maximizing energy deployment actually be slower over an entire race?
+    Yes — that's the deck's central paradox and the benchmark's Flat-Out
+    baseline: push mode is fastest for a few laps, then the battery sits at the
+    floor and the car reverts to recovery-limited pace, and the benchmark shows
+    push is NOT the fastest feasible mode on any stored race (balanced or
+    liftcoast wins, e.g. Monaco −1.88 s closing phase).
+
+--------------------------------------------------------------------------------
+TYRE DEGRADATION
+--------------------------------------------------------------------------------
+
+119. How do you define tyre degradation?
+    The loss of usable performance (lap time) as a set accumulates laps —
+    modelled as health % (100 on a fresh set) declining at a per-lap loss rate,
+    plus a pace penalty that grows with age and a cliff below 40% health.
+
+120. What is the difference between tyre degradation and tyre wear?
+    In this codebase they're two sides of the same coin: wear is the physical
+    loss of rubber (measured as the within-stint lap-time slope), degradation
+    is the performance consequence (the health curve + s/lap penalty). The
+    measured per-track multipliers come from wear slopes; the displayed health
+    curve is degradation.
+
+121. How do you separate tyre degradation from fuel burn?
+    You can't from a single stint (both are linear in lap number) — the code
+    says so explicitly. The approach: treat the ML's fitted tyre_age slope as
+    fuel (detrend it), and measure degradation RELATIVELY as within-stint
+    slopes with the flat fuel rate added back (measure_tyre_wear.py), then
+    anchor the absolute level to Pirelli's published %/lap bands.
+
+122. How do you separate tyre degradation from track evolution?
+    Not fully. Evolution (rubber-in, track cleaning) is one more linear-in-lap
+    effect, so measured per-track wear is expressed RELATIVE to the fleet
+    median (a rank, not an absolute), shrunk toward 1.0, and clamped — the
+    absolute curve comes from Pirelli research, not from the noisy per-track
+    slopes (the code notes the raw per-track numbers were "measured and
+    rejected as too noisy").
+
+123. How do you separate degradation from driver pace variation?
+    By fitting per-stint trends and dropping outliers (SC/pit laps, laps >2.5 s
+    from the stint median) and warm-up laps; the remaining driver-consistent
+    offset cancels in relative comparisons. The health curve itself is
+    deterministic given (compound, age, track) — no driver term.
+
+124. How do you account for tyre compound?
+    Each compound has its own loss rate (Soft 4.5, Medium 2.25, Hard 1.35,
+    Inter 2.0, Wet 1.8 %/lap), its own pace offset (Soft 0 / Medium +0.30 /
+    Hard +0.60 s/lap), its own usable life and its own measured slope floor
+    in the advisor; the ML adds per-compound intercepts and age interactions.
+
+125. How does tyre age affect lap time?
+    In the ML model the fitted age slope is (mostly) fuel and is detrended; in
+    the strategy layer age costs real time through the wear model: measured
+    slope × age (Soft floored at 0.05 s/lap, capped at 0.25), then the cliff
+    penalty below 40% health adds up to 2.5 s/lap. So age matters exactly the
+    way teams experience it: small early, accelerating late.
+
+126. Is tyre degradation linear?
+    In this model, health declines LINEARLY (a deliberate, explainable choice
+    matching Pirelli's "usable life lost per lap" framing and the deck's
+    "monotonic degradation" pitch). The PACE penalty is piecewise linear with a
+    knee/cliff (post-knee slope is steeper), so lap-time cost is convex even
+    though health is linear.
+
+127. Why might tyre degradation be non-linear?
+    Real tyres show thermal effects, graining, and a cliff: performance holds
+    then collapses as the tread loses grip in the last ~20% of life. The model
+    captures the cliff via CLIFF_HEALTH (40%) with a 1.5–2.5 s/lap ramp; a
+    fully non-linear (e.g. exponential) health curve is the natural upgrade.
+
+128. What is thermal degradation?
+    Loss of grip from overheating the compound (tyres are designed for a
+    temperature window; sustained sliding/overloading cooks the surface and
+    accelerates wear). Not modelled — a documented gap (no tyre-temperature
+    channel in the public data).
+
+129. What is graining?
+    Small particles of rubber torn from the tyre that stick to the surface,
+    reducing grip — typically on low-severity corners with cold tyres; causes
+    a temporary pace loss that can recover. Not explicitly modelled.
+
+130. What is overheating?
+    The tyre exceeding its optimal temperature window and losing grip and
+    increasing wear. It is why aggressive laps can wear tyres faster and why
+    management (lifting, different lines) matters. Not explicitly modelled.
+
+131. What is the tyre cliff?
+    The performance cliff: below ~40% health, lap times "suddenly plummet by
+    1.5 to 2.5 seconds per lap" (Pirelli-reported behaviour). It's why teams
+    pit 1–2 laps before the threshold, at 40–50% health — the model's gold
+    pit window.
+
+132. How do you identify the tyre cliff from data?
+    stint_analysis.py detrends each stint (fits the fuel/linear trend) and
+    looks for positive deltas at high age — the non-linear part of wear. The
+    deployed model doesn't fit a cliff from data; it uses the researched
+    40%/2.5 s/lap rule, which is the explainable choice.
+
+133. How would you model degradation mathematically?
+    health(a) = 100 − r·a (linear), or health(a) = 100·exp(−λa) (exponential),
+    or a two-phase piecewise: 100 − s₁a for a ≤ knee, then −s₂(a−knee) with
+    s₂ ≫ s₁. The advisor's fallback TYRE_WEAR is exactly the piecewise form;
+    the primary path is the measured slope × age with the cliff ramp.
+
+134. Why might a polynomial model be inappropriate?
+    High-degree polynomials oscillate (unphysical "tyres get faster at age
+    30" bumps), extrapolate wildly, and the deck demands monotonic curves.
+    Physically-informed piecewise/linear-with-cliff models are preferred.
+
+135. Would you use regression, time-series models, gradient boosting or neural networks?
+    For lap-time prediction, regularised linear regression is the deployed
+    choice (smooth, explainable, monotonic); mixed models (random track/stint
+    effects) are benchmarked as strong alternatives; gradient boosting would
+    win on raw accuracy but break monotonicity; neural nets are unnecessary at
+    this data scale and hurt explainability.
+
+136. How would you validate your tyre model?
+    (1) Reproduce the known "health after 20 laps" pattern (Soft dead, Medium
+    ~45–65%, Hard ~70–80%); (2) check measured per-track multipliers against
+    published abrasion rankings; (3) backtest: does the advisor's recommended
+    pit lap match real pit laps (within ±1 lap, as the deck claims for Monaco
+    2023)?; (4) sensitivity analysis on the wear slope.
+
+137. How would you prevent fuel load from being interpreted as tyre degradation?
+    Exactly what the code does: exclude warm-up laps, fit per-stint trends,
+    detrend by the fuel-burn rate, and measure wear RELATIVE to the fleet
+    median so the fuel effect cancels. A continuous fuel feature was tried and
+    removed because it is collinear with tyre age inside a stint.
+
+138. How would you account for Safety Car laps?
+    Drop them from training/stint fits (the >1.30× session-median filter and
+    the >2.5 s stint-deviation filter) and treat SC periods separately in
+    strategy (free/cheap stops, tyre temperature loss). The tyre model itself
+    doesn't age tyres during SC laps differently (a simplification).
+
+139. How would you account for pit-out and pit-in laps?
+    Both excluded from training and from stint trend fits; stint_analysis
+    marks them is_pit_lap and gives them a separate pit_delta (offset from the
+    pace line) so the chart shows the stop as a spike, not a hole. The overtake
+    pair builder drops pit in/out laps too.
+
+140. How would you account for different track temperatures?
+    Not currently — no track-temperature data in the pipeline. The natural
+    upgrade: add track temp as a feature/regressor (hot tracks wear more,
+    compound windows shift), since Pirelli publishes per-track temp guidance.
+
+141. How would you account for different compounds across different seasons?
+    Compounds are one-hot tokens, so a compound raced in different seasons
+    shares one term while the era bucket absorbs season pace drift. The tyre
+    model keys on the compound name with per-track multipliers; a per-(season,
+    compound) table would be the upgrade if the Pirelli naming/behaviour
+    changed across eras.
+
+142. How would you determine whether a tyre is genuinely degrading?
+    Statistical: fit the stint trend excluding warm-up/SC laps, check the slope
+    is significantly positive AFTER fuel correction, and look for the cliff
+    (accelerating positive deltas at high age). The code does this per stint
+    and aggregates to fleet-relative multipliers with shrinkage.
+
+143. Can your model predict the optimal pit window?
+    Yes — that's the advisor's core output. The DP stint optimizer finds the
+    fastest stop plan (when/which compound) given wear, pace offsets, pit loss,
+    inventory and the current event, and the tyre model's 40–50% pit window
+    plus cliff penalty structure the recommendation.
+
+144. Can your tyre model predict the number of competitive laps remaining?
+    Yes: usable_life = 100 / loss_per_lap (per compound and track), and the
+    advisor's _life_laps is the age where wear hits ~1.5 s/lap. The chart and
+    CLI print "usable life to the display floor" per compound/track.
+
+145. How would tyre degradation affect your overtake model?
+    Through chaser_age_minus_leader and chaser_tyre_advantage: fresher/softer
+    tyres raise predicted closing rate and P(overtake). In the P1 replay these
+    are read per lap, so a degrading leader's gap closes lap by lap.
+
+146. How would tyre degradation affect your energy strategy?
+    Through shared pace: if tyres are dead, deploying ERS to hold position may
+    be the only defence; if tyres are fresh, saving battery can set up a late
+    attack. The platform scores energy modes on remaining-race time (which
+    includes tyre-age detrending) but doesn't yet jointly optimise both.
+
+--------------------------------------------------------------------------------
+SIMULATION
+--------------------------------------------------------------------------------
+
+147. How does your race simulator work?
+    Two simulators. The FULL-RACE replay (simulate_full_race) walks two real
+    sessions lap by lap: per lap it builds the P0 feature row from DB context,
+    predicts closing rate + P(overtake), shapes the intra-lap gap with the
+    aligned speed traces, splits P into sector shares, and fires a pass when P
+    crosses the trigger. The LIVE call (simulate_live_call) needs no stored
+    sessions: career pace models walk the race forward from current tyre state,
+    gap moves by predicted pace edge, and the pass lap is when cumulative
+    P(overtake) crosses the target.
+
+148. What happens on each simulated lap?
+    Tyre ages tick +1, the gap moves by the predicted pace edge (live call) or
+    by the trace-aligned closing (replay), P(overtake) is computed inside the
+    window, cumulative probability updates, and ERS bookkeeping (deploy/bank/
+    SOC) is tracked when the lever is active. A pass swaps roles with a small
+    residual gap.
+
+149. Which variables are updated after every lap?
+    Gap (before/after), tyre ages, cumulative P(overtake), pace gap, per-lap
+    probability, sector shares, SOC (when ERS lever on), and the projected
+    final gap/flag ages. Fuel is held per stored lap in the replay; in the live
+    call fuel is neutral unless a diff is supplied.
+
+150. How does the simulator update the gap between drivers?
+    gap_next = max(0.05, gap − pace_edge) in the live call (pace_edge =
+    leader predicted − chaser predicted; positive closes). In the replay the
+    per-lap closing rate (trace-aligned) is used, and a pass resets roles with
+    gap = max(0.3, 0.35×gap).
+
+151. How does it update fuel?
+    The replay reads each driver's stored fuel_load per lap; the live call
+    keeps fuel neutral (0 diff) unless the user supplies fuel_diff_kg in the
+    battle tuner. There is no fuel-burn simulation in the live walk.
+
+152. How does it update tyre age?
+    +1 per lap on both cars from the supplied starting ages; compounds are held
+    fixed to the flag (no pit-stop model in the live call — flagged as an
+    extrapolation warning past 42 laps, and the UI tells the user to re-run
+    after stops).
+
+153. How does it update energy?
+    Only when the chaser ERS lever is active: per-lap net deploy/bank is drawn
+    from (or banked into) the 4 MJ store against the 30% floor, the pace effect
+    is the sector-weighted shape × delivery fraction, and energy-limited laps
+    are counted. The leader is always Balanced. The replay instead reads stored
+    race_state traces (or re-projects per-mode traces for the ERS sweep).
+
+154. How does an overtake terminate the battle?
+    When the chaser's per-lap probability crosses the trigger (replay) or
+    cumulative probability crosses the target (live call): roles swap, the gap
+    resets small, and the sim continues with the other driver ahead. The battle
+    also ends if the gap blows open beyond BATTLE_END_GAP_S (10 s) or laps run
+    out.
+
+155. How do you model different ERS strategies simultaneously?
+    The full-race replay re-runs the race once per requested mode with that
+    mode's projected ERS trace on BOTH cars (only energy_diff changes, so the
+    comparison isolates the deployment choice), and mode_compare summarises
+    deployed MJ, final battery, pass lap and corner heat per mode.
+
+156. How do you model leader vs chaser strategy combinations?
+    Asymmetric ERS duels (mode_pairs): each side gets its own spec ('push',
+    'balanced', 'liftcoast' or 'stored' = the real trace), each driver keeps
+    their spec even after a pass, and the output answers "when does the
+    overtake happen if the leader defends on Balanced while the chaser attacks
+    on Push?".
+
+157. What happens when the simulation reaches the finish?
+    The walk stops at the race_length/end_lap (or when laps run out); it
+    returns the per-lap records, the final gap, projected flag tyre ages, and
+    the call/verdict. No finishing-order projection beyond the pair's head-to-
+    head is attempted.
+
+158. How do you determine the optimal strategy?
+    The strategy advisor runs a DP stint optimizer over the remaining laps:
+    for each total-stop count 0..3 it finds the cheapest (compound, lap)
+    sequence using the wear/pace/pit-loss model, subject to fresh-set
+    inventory; it then picks the plan with the lowest projected total time
+    (ML baseline + relative cost). The energy benchmark picks the fastest
+    MODE whose trace finishes above the battery reserve.
+
+159. What does "optimal" mean in your system?
+    Minimise projected total remaining race time under the modelled physics:
+    wear cost + compound pace offsets + pit losses + (energy: mode feasibility
+    above the reserve). It is optimal WITHIN the model — the true optimum on
+    track depends on factors (traffic, weather, incidents) the model doesn't
+    price.
+
+160. Is the fastest strategy always the best strategy?
+    No — the advisor assigns risk (Low/Medium/High) to every plan (can the set
+    realistically reach its stint length? is the plan viable on a wet track?)
+    and the energy layer refuses modes that finish below the battery floor.
+    The UI shows cost AND risk; a human picks the robust option.
+
+161. How do you handle uncertainty?
+    The comparison layer uses a paired t-test to label pace gaps significant/
+    suggestive/inconclusive; the overtake tooling reports calibration trust
+    tiers and gap-trajectory MAE/bias; backtests report precision/recall. There
+    are no formal confidence intervals on race-time projections yet — a known
+    gap.
+
+162. Does your simulator provide confidence intervals?
+    Not currently. Predictions are point estimates; uncertainty is conveyed
+    indirectly (model MAEs, significance verdicts, trust tiers, calibration
+    buckets). Conformal prediction is the natural upgrade.
+
+163. How sensitive is the result to the initial gap?
+    Very — the live call's verdict depends directly on gap_before_s (the
+    window opens sooner and cumulative P accumulates faster from a smaller
+    gap), which is why the UI exposes the gap slider and the backtest sweeps
+    checkpoints at multiple gaps (min/max gap filters).
+
+164. How sensitive is it to battery SOC?
+    Moderately: energy_diff only enters the overtake features (clipped to
+    [−2.0, +0.6] MJ), so SOC differences shift pass probabilities modestly
+    within the trained domain; beyond the clip the model is explicitly not
+    trusted. The energy MODE comparison is where SOC matters most (feasibility
+    + pace credit).
+
+165. How sensitive is it to tyre age?
+    High through the pace edge: the live call predicts lap time with age
+    advancing every lap, so a bigger starting age gap (chaser fresher) closes
+    the gap faster, and the extrapolation flag fires past 42-lap stints.
+
+166. How sensitive is it to fuel load?
+    Low in the live call (fuel neutral by default, only a user-supplied diff),
+    higher in the replay (stored fuel per lap) and the battle tuner (fuel_diff
+    is a P0 feature). The ML's fuel-burn rate is detrended so fuel itself
+    doesn't double-count.
+
+--------------------------------------------------------------------------------
+PRODUCTION / ENGINEERING
+--------------------------------------------------------------------------------
+
+167. How would you deploy this system?
+    As-is: run_server.py serves the Flask app with Waitress on 0.0.0.0:5000
+    (PORT/HOST env vars); MySQL runs alongside; models/artifacts are static
+    files. For production: containerise (Docker) the app + DB, mount
+    ml_models/ and f1_cache/, run the importer/trainer as batch jobs, and put
+    the dashboard behind a reverse proxy with auth.
+
+168. How would you handle real-time telemetry?
+    The UDP capture already streams live data into the same schema with a
+    background DB worker, heartbeat liveness, and stream-drop alerts. Scaling
+    to real F1-rate telemetry would mean a message broker (Kafka/NATS) and a
+    streaming feature service rather than per-packet inserts.
+
+169. What is the latency of your system?
+    Lap prediction is milliseconds (linear model, <5 ms claimed; the deck says
+    <2 ms inference, <500 ms for a 20-lap simulation); the energy sandbox
+    recalculates in ~284 ms per the deck; a full season calibration scan takes
+    seconds per race with models cached in-process.
+
+170. Can the system make a decision within one lap?
+    Yes — every endpoint (strategy analyze, energy modes, live call, sandbox)
+    is designed to be interactive at sub-second latency, so a pit wall can
+    re-run it every lap with fresh state.
+
+171. How would you handle thousands of telemetry points per second?
+    Batch writes (the capture already queues DB tasks to a worker thread),
+    downsample/aggregate before insert, partition telemetry by season/session,
+    and move ingestion off the web process. The current ~1 Hz persistence is
+    intentionally light.
+
+172. How would you cache predictions?
+    The dashboard already caches the season calibration scan per (leader,
+    chaser, year) in-process, loads models once at startup, and pins tree
+    models' n_jobs to 1 to avoid per-predict pool spawn. Further: LRU caches
+    keyed on feature hashes and a predictions table.
+
+173. How would you monitor model drift?
+    The project already has check_energy_benchmark_drift.py: re-run the
+    benchmark fresh and fail loudly if headline numbers move beyond 0.02 s.
+    Generalising: track prediction residuals vs real laps, feature-distribution
+    drift, and classification calibration over time.
+
+174. How would you retrain the models?
+    Re-run the launchers in order: import new data → audit pit events →
+    ml_lap_predictions.py (global + per-driver + per-year) → ml_overtake_
+    predictions.py → measure_tyre_wear.py → regenerate energy_pace.json —
+    then re-run the benchmark/drift scripts and re-commit artifacts if
+    intended. Retraining is script-driven and deterministic by design.
+
+175. How would you version models?
+    Artifacts already carry trained_at, model_info.json metadata, feature lists
+    and metrics; the natural upgrade is git-tagging artifacts or storing model
+    registry rows (schema has a regulations/data_sources provenance pattern)
+    so a deployed prediction can be traced to a training run.
+
+176. How would you version datasets?
+    Keep import scripts + seed DB exports (database/exports/) versioned with
+    git, record data_sources rows, and store per-training stats (lap counts,
+    tracks, coverage) in model_info — enough to reproduce the dataset shape.
+    A true dataset registry (hashes + snapshots) would be the next step.
+
+177. How would you reproduce a prediction from six months ago?
+    Because training is deterministic (fixed random_state 42, same DB → same
+    numbers, per the benchmark scripts) and artifacts are committed, you check
+    out the ml_models/ from that point plus the DB export and re-run the
+    trainer; model_info.json records features, coverage and metrics for
+    verification.
+
+178. What happens if your ML service goes down during a race?
+    The dashboard fails gracefully: lazy model loads mean the UI starts without
+    models and endpoints return clear "run the trainer" errors; the tyre and
+    energy models are pure functions (no service dependency) so parts of the
+    UI still work. Production would add health checks, model failover and a
+    degraded-mode flag.
+
+179. What happens if telemetry stops arriving?
+    The capture heartbeat flips to STALLED, prints/beeps a drop alert, and
+    never marks an in-progress lap valid — so a stalled feed can't corrupt the
+    data. The dashboard simply shows the last-known state.
+
+180. How would you containerize the application?
+    Dockerfile (Python 3.13, requirements.txt) for the Flask/Waitress app +
+    a MySQL container or volume, mount ml_models/, f1_cache/ and .env, expose
+    5000, and run importer/trainer/benchmark as one-off containers. A
+    docker-compose for app + db is the straightforward path.
+
+181. How would you secure the API?
+    Currently the dev server binds 127.0.0.1 only (the code notes the Werkzeug
+    console is RCE if exposed). For production: bind via run_server.py behind
+    a reverse proxy, add authentication/API keys, rate limiting, input
+    validation (already present for most endpoints), and HTTPS.
+
+182. How would you test the system?
+    Unit tests for pure functions (fuel, tyre model, feature construction,
+    energy stepping, pair construction) + integration tests hitting the DB with
+    a small fixture + endpoint smoke tests; the launchers include
+    11_run_tests.bat (unittest, no DB needed).
+
+183. What unit tests do you have?
+    A tests/ folder is referenced by 11_run_tests.bat (python -m unittest
+    discover -s tests) — the launcher prints a notice if the folder isn't
+    present. The pure-model modules (tyre_degradation, fuel_estimation, energy
+    simulator, feature_pipeline) are structured to be unit-testable; adding a
+    full suite is an open task.
+
+184. What integration tests do you have?
+    The strongest integration checks are the benchmark/backtest scripts
+    themselves: benchmark_energy_strategy.py (Monaco reproduction), the fleet
+    sweep, backtest_race_calls.py (replay stored races), and the drift checker
+    — all of which exercise the DB + models + simulators end to end and compare
+    against committed artifacts.
+
+185. How would you benchmark the system?
+    benchmark_models.py (model selection on MAE/R²/smoothness), benchmark_
+    energy_strategy.py (strategy vs Flat-Out), benchmark_energy_fleet.py (all
+    races), backtest_race_calls.py (window/pass/gap calibration), and the
+    deck's latency claims (<2 ms inference, <500 ms sim, ~284 ms sandbox).
+
+186. What is the biggest technical limitation of your current implementation?
+    The synthetic data problem: fuel, battery SOC and parts of the tyre state
+    are modelled, not measured, so the ML can learn correlations with proxies
+    rather than physics; second is the tiny overtake positive class (26
+    labels); third is the absence of weather/track-temperature/traffic
+    features. The code is unusually honest about all three.
+
+--------------------------------------------------------------------------------
+FIA / F1 TECHNICAL
+--------------------------------------------------------------------------------
+
+187. What is the FIA?
+    The Fédération Internationale de l'Automobile — motorsport's world
+    governing body. It writes and enforces the Formula 1 Sporting and
+    Technical Regulations that define everything from race format and points
+    to power-unit limits, and it's who the deck's "FIA Battery Minimums
+    compliance" refers to.
+
+188. What is the difference between the FIA Sporting Regulations and Technical Regulations?
+    Sporting Regulations govern HOW races are run (format, safety car
+    procedures, pit rules, penalties, session lengths); Technical Regulations
+    govern WHAT the cars are (dimensions, weight, power-unit energy limits,
+    tyres, aero). This project consumes both: sporting for event detection
+    (SC/VSC/red flag/pit rules) and technical for the energy-store and
+    deployment/recovery caps.
+
+189. What regulations govern the power unit?
+    The FIA Technical Regulations, Power Unit chapter (Article 5), which sets
+    MGU-K power, Energy Store capacity, and per-lap energy flow limits — the
+    project cites C5.2.10 (per-lap recharge) and the ES/4 MJ rules for the
+    2026 PU.
+
+190. What changed between the 2025 and 2026 regulations?
+    2026 is a new PU generation: MGU-H removed, MGU-K power up from 120 kW to
+    350 kW (deploy and recover), simplified energy flow, 4 MJ usable store kept
+    (per the project's spec), per-lap recharge raised to 8.5 MJ/lap, minimum
+    car mass down to ~768 kg, plus a May-2026 refinement (350 kW in
+    acceleration/overtaking zones, 250 kW elsewhere, manual Boost +150 kW).
+
+191. What are the major characteristics of the 2026 power-unit regulations?
+    Per the simulator's PU_SPECS: single 350 kW MGU-K (no MGU-H), 4 MJ usable
+    Energy Store, 8.5 MJ/lap harvest cap (circuit-adjusted 5–9 MJ), no fixed
+    per-lap deployment quota (store-limited bursts), ~768 kg minimum mass.
+
+192. What happened to the MGU-H for 2026?
+    It was removed. The MGU-H (heat recovery from the turbocharger exhaust)
+    is dropped in the 2026 regs, simplifying the PU and making the MGU-K the
+    sole electrical machine — hence the simulator's "single 350 kW MGU-K (no
+    MGU-H)".
+
+193. What is the role of the MGU-K?
+    The Motor Generator Unit–Kinetic: one electric machine on the drivetrain
+    that deploys stored electrical energy to assist acceleration (motor mode)
+    and recovers kinetic energy under braking (generator mode). Its power cap
+    bounds both directions (120 kW legacy, 350 kW 2026).
+
+194. What is the relationship between the internal combustion engine and electrical power?
+    The ICE provides the baseline power; the MGU-K adds electrical power on
+    top (deployment), bounded by battery and regulations. Electrical energy
+    comes from energy recovered under braking (and formerly from the exhaust
+    via MGU-H). Total usable power is ICE + electrical, managed by the PU
+    control strategy.
+
+195. What is the maximum electrical deployment allowed under the regulations?
+    2026: 350 kW MGU-K (with the May-2026 refinement limiting to 250 kW outside
+    acceleration/overtaking zones and capping manual Boost at +150 kW), and no
+    fixed per-lap deployment quota — deployment is store-limited bursts up to
+    the 8.5 MJ/lap ceiling. Legacy (2014–2025): 120 kW and a hard 4 MJ/lap
+    quota.
+
+196. What restrictions exist on energy harvesting?
+    Per-lap recharge caps: 8.5 MJ/lap baseline for 2026 (C5.2.10, circuit-
+    adjusted 5–9 MJ), 2 MJ/lap for 2014–2025, plus the Energy Store's 4 MJ
+    capacity and the store's headroom at any moment (a full battery cannot
+    accept regen).
+
+197. Why do regulations matter when building a race simulator?
+    Because the "optimal" strategy must be physically and legally feasible:
+    a plan that deploys 20 MJ/lap or runs the battery to 0% is not a plan.
+    The simulator hard-caps deploy/harvest/SOC by the era's regulations and
+    the strategy layer refuses infeasible modes — that's the "FIA Battery
+    Minimums compliance" claim.
+
+198. How does your system prevent a strategy from violating regulations?
+    The energy model clamps every flow to the era caps (harvest limit, deploy
+    ceiling, 120 kW rate, store capacity/reserve) and reports "energy-limited"
+    laps; the energy mode comparison only recommends modes that finish above
+    the reserve; the sector sandbox surfaces explicit FIA-cap warnings
+    (fia_deploy_quota, fia_recharge_cap) when a request would breach them.
+
+199. How would your system adapt when regulations change?
+    Through the PU spec table (PU_SPECS) and spec_for_year: new regs = a new
+    spec dict (MGU-K kW, capacity, harvest/deploy caps, mass) plus new era
+    buckets in the feature pipeline and a retrain. The regulations table in the
+    schema exists to hold per-era limits.
+
+200. Who supplies tyres to F1?
+    Pirelli is the single tyre supplier, which is why the degradation model is
+    anchored to Pirelli's published compound bands and the project cites
+    "Pirelli race notes".
+
+201. What are the current dry-weather tyre compounds?
+    Five base compounds C1–C5 (hardest to softest), branded at each race as
+    Hard, Medium and Soft (three of the five are nominated per weekend). The
+    model's enum also keeps older names (Hypersoft/Ultrasoft/Supersoft) for
+    historical seasons.
+
+202. What do C1, C2, C3, C4 and C5 mean?
+    Pirelli's five dry slick compounds, C1 hardest (slowest warm-up, longest
+    life) to C5 softest (fastest warm-up, shortest life). The project's
+    TYRE_ORDER ranks them by speed: Hypersoft > Ultrasoft > Supersoft > Soft >
+    Medium > Hard > Superhard.
+
+203. What is the difference between a compound and a tyre designation?
+    The compound is the rubber blend (C1–C5); the designation is the raced
+    name (Hard/Medium/Soft), which changes per weekend depending on which
+    three compounds are nominated. The model treats the raced names as the
+    categorical feature and the researched rates by raced name.
+
+204. What are Soft, Medium and Hard?
+    The three dry slick compounds nominated per race weekend: Soft (fastest,
+    ~15–22 lap life), Medium (middle, ~25–30), Hard (slowest, ~35–45) — the
+    project's TYRE_LIFE and LOSS_PER_LAP values mirror exactly those bands.
+
+205. How are the three race compounds selected?
+    Pirelli nominates three of the five C-compounds per weekend based on
+    circuit abrasion, layout and expected conditions. The project's track
+    abrasion map (Bahrain 1.25 … Silverstone 0.90) captures the same circuit
+    character that drives those choices.
+
+206. What is the difference between a tyre's compound and its tyre set?
+    Compound = rubber type; set = the physical allocation (a driver has a
+    limited number of sets per weekend — the project's SET_ALLOCATION: 2 Hard
+    / 3 Medium / 4 Soft / 3 Inter / 2 Wet — and each stint consumes one set).
+    Inventory feasibility is enforced in the stint optimizer.
+
+207. What are the mandatory tyre requirements during a dry race?
+    The Sporting Regulations require using two different dry compounds during
+    a dry race (the "must use two compounds" rule), which is why one-stint
+    plans aren't legal to the flag. The project's inventory/optimizer is
+    structured for this (a plan can only run one compound if the race is wet).
+
+208. What happens during a wet race?
+    The two-compound rule is waived: full Wets or Inters can be used
+    throughout. The strategy advisor's Rain path reflects this (no compound
+    switching required; wet compounds get their own pace offsets and rates).
+
+209. What are Intermediate tyres?
+    "Inters" — treaded tyres for light rain/drying tracks, faster than slicks
+    in standing-but-manageable water and the reference for the RAIN_PACE_DELTA
+    (slicks ~3 s/lap slower in the model).
+
+210. What are Full Wet tyres?
+    Heavily treaded tyres for standing water; the model rates them +1.6 s/lap
+    vs Inters and only faster than slicks once standing water appears (the
+    code cites standard crossover guidance).
+
+211. What is graining?
+    Rubber tearing off the surface and re-sticking, causing a temporary grip
+    loss (often from cold tyres or low corner severity). Not modelled.
+
+212. What is blistering?
+    Surface rubber overheating and bubbling/blistering, causing rapid wear and
+    delamination risk — a high-load, hot-track failure mode. Not modelled.
+
+213. What causes thermal degradation?
+    Sustained operation outside the tyre's temperature window (too hot: faster
+    wear/blistering; too cold: graining/low grip). The model captures the
+    performance consequence via the wear/cliff curves but has no temperature
+    channel.
+
+214. How does track temperature affect tyres?
+    Hot tracks increase wear and shift the fast window toward harder compounds;
+    cold tracks slow warm-up and cause graining. The abrasion map approximates
+    circuit character, but track temperature is not a feature (documented gap).
+
+215. How does tyre pressure affect performance?
+    Lower pressure = more grip/contact patch but more heat and wear/risk;
+    higher pressure = less grip but more stability. It's a setup variable the
+    public data doesn't include; the model ignores it.
+
+216. How does camber affect tyre behaviour?
+    Negative camber loads the inside shoulder, improving cornering grip at the
+    cost of uneven wear and heat. A setup factor outside the model's scope.
+
+217. How does downforce affect tyre load?
+    More downforce = more vertical load = more grip and higher tyre energy
+    (temperature and wear), especially in high-speed corners. This is why
+    downforce tracks (Barcelona) wear tyres more — reflected in the abrasion
+    map.
+
+218. How does driving style affect tyre degradation?
+    Aggressive braking, early throttle and sliding all add tyre energy and
+    wear; smooth management extends life. The model has no driver-style term
+    (measured wear is fleet-relative), which is a simplification.
+
+219. Why can a faster lap sometimes produce greater tyre degradation?
+    More energy through the tyre (higher corner loads, harder braking,
+    more sliding) = more wear/heat. Pace and wear share a budget, which is the
+    strategic heart of tyre management and of the deck's energy paradox.
+
+220. Why can a slower lap sometimes preserve tyres?
+    Lifting earlier, braking less hard and taking a cleaner line reduce
+    energy into the tyres, slowing degradation — the basis of "tyre
+    management": trade a few tenths now for many seconds later.
+
+221. What is tyre warm-up?
+    The initial phase when a new set must reach its operating temperature
+    window before delivering peak grip; out-laps and the first laps of a
+    stint are compromised. The model drops the first two laps of each stint
+    (STINT_WARMUP_LAPS) from training for exactly this reason.
+
+222. Why are cold tyres slower?
+    Below the operating window the rubber lacks grip (hard, slippery), so
+    braking distances grow and cornering speeds drop — the warm-up laps the
+    trainer excludes and the stint-analysis warm-up filter (age ≤2).
+
+223. Why is tyre management important in a long stint?
+    Because degradation compounds: small early savings avoid the cliff later,
+    extend the set's life past the crossover, and can remove a pit stop. The
+    advisor's risk layer and wear curves price exactly that trade-off.
+
+--------------------------------------------------------------------------------
+RACE STRATEGY
+--------------------------------------------------------------------------------
+
+224. What determines whether a one-stop or two-stop strategy is faster?
+    The balance: pit-loss time (~22 s green) vs the cumulative pace penalty of
+    running older tyres (wear slope × age, cliff risk) and the compound pace
+    offset on the new set. The DP optimizer solves this trade for every
+    stop count 0–3 and picks the cheapest.
+
+225. What is the pit-loss time?
+    The race time lost by pitting: ~21.9 s green-flag (Formula Dream measured
+    2025 figures cited in the code), ~18.1 s under VSC, ~14.2 s under SC,
+    free under red flag — scaled by rejoin traffic in the advisor
+    (TRAFFIC_PIT_FACTOR).
+
+226. What is an undercut?
+    Pitting a lap or two BEFORE the car ahead to undercut them in the pit
+    window: fresh-tyre pace on the out-lap jumps you ahead while they pit
+    later. The advisor flags an undercut window when within 5 s of the car
+    ahead (UNDERCUT_GAP_S).
+
+227. What is an overcut?
+    Staying out while a rival pits (with enough track ahead) to bank clear-air
+    pace, then pitting later and rejoining ahead. The advisor flags it when
+    leading by ≥8 s (OVERCUT_GAP_S).
+
+228. What is a pit window?
+    The lap range in which stopping is optimal — the tyre model's 40–50% health
+    band, 1–2 laps before the performance cliff, is the natural pit window the
+    chart highlights.
+
+229. What is the crossover point between compounds?
+    The stint age at which an older, faster compound becomes slower than a
+    fresh, slower compound (their pace curves cross) — equivalently where the
+    wear penalty of the current set exceeds the pit loss plus the new set's
+    pace offset. The advisor's stint-cost comparison implements this
+    implicitly.
+
+230. What is a tyre offset?
+    The per-lap pace difference between two compounds (Soft 0 / Medium +0.30 /
+    Hard +0.60 s/lap in TYRE_PACE_DELTA) — the premium paid for the faster
+    compound, central to pit-strategy arithmetic.
+
+231. How does a Safety Car change pit-stop strategy?
+    It bunches the field and subsidises stops (everyone slows, so the pit loss
+    shrinks to ~14 s): an otherwise-unprofitable stop becomes profitable, and
+    the advisor discounts stops taken under SC and recommends pitting.
+
+232. How does a Virtual Safety Car change strategy?
+    Same subsidising effect at ~18 s pit loss (everyone must hold a delta, so
+    the stop costs less race time). VSC windows are prime pit-stop moments —
+    the advisor treats VSC like SC with a bigger loss.
+
+233. Why can pitting under a Safety Car be advantageous?
+    Because the whole field's race clock slows: you lose less track time (the
+    bunching means you don't fall behind positionally), you get fresh tyres,
+    and you're still close at the restart. The model charges 14 s instead of
+    22 s for that stop.
+
+234. What is the difference between track position and race pace?
+    Track position is where you are on the road (worth seconds in overtaking
+    difficulty and clean air); race pace is raw speed. Strategy trades one for
+    the other: pit (lose position, gain pace) or stay out (keep position, risk
+    slower tyres). The advisor's undercut/overcut notes are exactly this
+    trade.
+
+235. Why might a driver stay out on slower tyres?
+    If the pit loss + rejoin traffic costs more than the wear penalty, if
+    track position is hard to regain (Monaco-style), or if a neutralisation is
+    imminent (stop for free later). The advisor's risk/cost comparison prices
+    all three.
+
+236. What is tyre delta?
+    The per-lap time difference between two compounds/sets at a given age —
+    the number that decides whether an extra stop pays (tyre offset + wear
+    differential vs pit loss).
+
+237. What is the importance of clean air?
+    Unperturbed air = full downforce = predictable, faster laps and lower tyre
+    energy. Leading with clean air is worth ~0.3–0.5 s/lap in dirty-air tracks,
+    which is the overcut's logic.
+
+238. What is dirty air?
+    The turbulent wake behind a car that reduces following cars' downforce and
+    grip — makes following harder and overtaking costlier. Only implicitly in
+    the model (speed-trace corner losses), listed as a limitation.
+
+239. How does dirty air affect following distance?
+    Closer following = more turbulence = more grip loss, so a chaser often has
+    to run a different (sometimes compromised) line and heats tyres harder —
+    which is why close battles are also tyre battles.
+
+240. How does DRS affect overtaking?
+    The Drag Reduction System opens the rear wing to cut drag on designated
+    straights, adding ~10–15 km/h to the chasing car — the single biggest
+    overtaking aid in modern F1. The model has no DRS feature; it appears only
+    through speed traces (documented gap).
+
+241. What is the DRS detection point?
+    The track location where the 1-second gap to the car ahead is measured to
+    grant/deny DRS — circuit-specific; not modelled.
+
+242. What is a DRS activation zone?
+    The straight (usually after the detection point) where DRS may be used if
+    granted. Passes typically complete at the end of the zone; the corner
+    heatmap's pass mass near straights is a crude proxy.
+
+243. Why isn't being within one second always enough to guarantee an overtake?
+    Because completing the pass needs the following car to be faster through
+    the ENTIRE corner complex after the straight, survive braking, and hold
+    the line — dirty air, tyre state and circuit layout all matter. The
+    overtake model's ~12% real pass rate inside P∈[0.5,0.8) is exactly this
+    reality.
+
+244. How does circuit layout influence overtaking probability?
+    Wide braking zones, long straights with DRS and runoff promote passing;
+    narrow, twisty circuits (Monaco) make it near-impossible. The model learns
+    this through the track one-hot + speed traces (the training set's
+    per-track pass distributions, e.g. Monaco 2023's famous non-pass).
+
+245. Why are some circuits much harder to overtake at than others?
+    Monaco: no real straights, one racing line, walls — a pass needs a mistake.
+    Bahrain/Spa/Silverstone: heavy braking zones and DRS straights reward
+    fresh tyres. The track one-hot captures these structural differences for
+    the classifier; per-track pace s/MJ and abrasion capture them for energy
+    and tyres.
+
+--------------------------------------------------------------------------------
+RACING / TELEMETRY
+--------------------------------------------------------------------------------
+
+246. What is parc fermé?
+    The regulated period (after qualifying, and again after the race) during
+    which cars may not be worked on or set-ups changed without penalty. Not
+    modelled — it's a session-management concept outside the lap/strategy
+    scope.
+
+247. What is a formation lap?
+    The warm-up lap to the grid before lights-out. The model excludes lap 1
+    contexts (and the trainer excludes formation laps via the 60–180 s window).
+
+248. What is a flying lap?
+    A full-speed, representative lap (typically in qualifying) used to set a
+    time. Qualifying laps are not in the race-focused training sets.
+
+249. What is an out-lap?
+    The lap from the pits to the start of a flying lap — warm-up tyres, often
+    slow. The trainer excludes the lap after a pit in-lap, and stint analysis
+    marks out-laps.
+
+250. What is an in-lap?
+    The lap INTO the pits — the pit lane transit makes it 15–40 s slow. The
+    trainer excludes pit in-laps (strategy_events PitStop ≥15 s), the stint
+    analyzer marks them is_pit_lap with a separate pit_delta, and the overtake
+    pair builder drops them.
+
+251. What is a push lap?
+    A maximum-effort lap (flat-out). The energy model's Push mode is the
+    strategic version: full deployment every lap.
+
+252. What is a cooldown lap?
+    A slow post-race/out-lap to cool tyres/brakes; not in the training data
+    (slow-lap filters remove it).
+
+253. What is lift-and-coast?
+    Lifting off the throttle early and coasting into a corner — saves fuel,
+    reduces tyre/brake heat, and in 2026 opens a longer MGU-K regen window.
+    The energy model's liftcoast mode (+20% harvest) and the live call's
+    Lift & Coast ERS preset model it.
+
+254. What is brake bias?
+    The front/rear split of braking force (a cockpit adjustment); affects
+    stability and tyre temperatures. Not modelled (not in public telemetry).
+
+255. What is differential?
+    The diff maps torque between the driven wheels through corners; setup
+    affects rotation and tyre wear. Not modelled.
+
+256. What is engine braking?
+    The drivetrain's deceleration effect when off-throttle (aided by MGU-K
+    regen in hybrids), which helps trail-braking rotation and charges the
+    battery. The speed-drop regen estimator implicitly captures its effect.
+
+257. What is DRS?
+    The Drag Reduction System: opening the rear wing element to reduce drag on
+    designated straights when within 1 s of the car ahead (race) — the
+    primary overtaking tool. Stored in telemetry (drs flag) but not a model
+    feature yet.
+
+258. What is slipstream?
+    The low-pressure wake behind a car that reduces drag for a follower —
+    worth several km/h on straights; the mechanism DRS amplifies. Appears via
+    speed traces in the segment alignment.
+
+259. What is dirty air?
+    The turbulent, low-downforce wake behind a car (see 238) — the cost side
+    of slipstream; why following through corners is hard.
+
+260. What is a tow?
+    Deliberately following a car to use its slipstream, e.g. in qualifying to
+    gain straight-line speed. Not modelled.
+
+261. What is track evolution?
+    The track getting faster as rubber is laid down and debris clears over a
+    weekend. The model absorbs it into era/stint trends and treats measured
+    wear as fleet-relative partly because of it.
+
+262. What is marbles?
+    Rubber debris shed by tyres and pushed off-line; running on marbles costs
+    grip. Not modelled.
+
+263. What is a yellow flag?
+    A warning of a hazard ahead — drivers must slow and may not overtake
+    (single yellow) or must be prepared to stop (double yellow). Not modelled
+    beyond slow-lap filtering.
+
+264. What is a double yellow?
+    A stronger hazard warning — drivers must slow significantly and be ready to
+    stop; no overtaking. Same treatment (outlier-lap filtering) as single
+    yellows.
+
+265. What is a red flag?
+    Session stopped (often after serious incidents or severe weather). The
+    capture detects it (≥200% lap time + <40% speed), the trainer excludes red-
+    flag laps, and the advisor treats a stop under a red flag as FREE (0 s
+    pit loss).
+
+266. What is a Safety Car?
+    A pace car that bunches the field behind it at reduced speed after an
+    incident. Detected in capture (slow lap + speed gate), excluded from
+    training, and modelled as a pit-subsidising window (~14 s stop).
+
+267. What is a Virtual Safety Car?
+    A no-car neutralisation where drivers hold a delta time; detected as a
+    moderate-slow lap with a speed gate; modelled as a ~18 s stop window.
+
+268. What is a restart?
+    The green-flag resumption after an SC/VSC — a chaotic, high-value window
+    for passes (fresh tyres, bunched field). Not explicitly modelled; the
+    race-call backtest treats SC compression as real convergence.
+
+269. What happens to tyre temperature during a Safety Car period?
+    Tyres cool substantially (low load), costing grip and sometimes a slow
+    first lap after the restart — one reason teams pit under SC: the old set
+    is cooling anyway and the new set gets its heat-up lap behind the SC.
+
+270. How does a Safety Car affect tyre degradation?
+    It freezes lap-count-based wear (low load) while the field bunches — so a
+    stop under SC loses less time AND the new set loses less life. The model
+    doesn't age tyres by SC laps specially (a simplification).
+
+271. How does a Safety Car affect battery deployment?
+    During SC running there is little to deploy and plenty of time to recharge;
+    cars often bank energy to deploy at the restart. The energy simulator
+    doesn't special-case SC laps (a simplification; the live ERS lever lets a
+    user model banking manually).
+
+272. How does a Safety Car affect overtaking probability?
+    It compresses the field, so restart passes are common; the overtake model
+    has no SC context feature, so it treats the post-restart gap like any
+    other (the backtest accepts SC compression as real convergence).
+
+--------------------------------------------------------------------------------
+VEHICLE DYNAMICS
+--------------------------------------------------------------------------------
+
+273. What is downforce?
+    Vertical force (mostly from wings/floor) pressing the car into the track,
+    generating cornering grip — at the cost of drag. It's why high-downforce
+    cars corner faster and why following in dirty air is hard.
+
+274. What is drag?
+    The aerodynamic resistance opposing motion, proportional to speed² — the
+    cost side of downforce; reduced by DRS and slipstreams.
+
+275. What is the drag-reduction trade-off?
+    More downforce = more corner grip but more drag on straights; set-ups and
+    DRS tune the balance per circuit. The model absorbs the net effect per
+    track (pace levels) without separating aero components.
+
+276. What is aerodynamic efficiency?
+    The downforce-to-drag ratio (L/D) — the quality of an aero package;
+    higher efficiency = more grip per unit of drag. Not modelled directly.
+
+277. What is mechanical grip?
+    Grip from tyres, suspension and weight transfer (low-speed corners, kerbs,
+    traction) — as opposed to aero grip. Not modelled separately.
+
+278. What is aerodynamic grip?
+    Grip from downforce (speed-sensitive — grows with speed²); dominant in
+    fast corners and the reason dirty air hurts so much.
+
+279. How does downforce change through a lap?
+    It scales with speed²: minimal in slow corners, maximal on fast straights/
+    high-speed corners — so brake balance and tyre loading vary constantly
+    around the circuit. The per-track sector structure and full-throttle
+    shares approximate this.
+
+280. Why does downforce affect tyre degradation?
+    More aero load = more vertical force on the tyres = more energy/heat and
+    faster wear, especially on abrasive circuits. The abrasion map's
+    high-downforce venues (Barcelona) reflect this.
+
+281. What is weight transfer?
+    The shift of load between wheels under acceleration/braking/cornering —
+    longitudinal (front/rear) under throttle/brakes and lateral (left/right)
+    in corners. It sets per-tyre loads and thus temperatures and wear.
+
+282. What happens during longitudinal weight transfer?
+    Under braking the load moves forward (front tyres do most of the stopping);
+    under acceleration it moves rearward (rear tyres drive and manage
+    traction). This is why braking heats fronts and throttle use heats rears.
+
+283. What happens during lateral weight transfer?
+    In a corner the load shifts to the outside tyres, which do most of the
+    cornering and run hotter/wear faster — the physical basis of asymmetric
+    tyre management.
+
+284. How does braking affect tyre load?
+    Weight transfer loads the front tyres heavily under braking, so fronts
+    take the temperature/wear and lock risk; brake bias tunes the split.
+
+285. How does acceleration affect tyre load?
+    Rearward weight transfer loads the rears, so throttle control manages rear
+    traction, wheelspin and rear-tyre temperature/wear.
+
+286. Why do tyres lock up?
+    Braking force exceeds available grip (cold tyres, damp track, aero loss,
+    wrong bias) — the wheel stops rotating and the tyre slides, creating flat
+    spots. The model has no lock detection; lap invalidity flags sometimes
+    capture the consequence.
+
+287. What is understeer?
+    The car refuses to turn — front grip breaks first, pushing wide. Managed
+    with brake bias rearward, stiffer front or softer rear, and driving
+    technique.
+
+288. What is oversteer?
+    The rear slides out — rear grip breaks first, the car rotates too much.
+    Managed with brake bias forward, different roll stiffness, and throttle
+    care.
+
+289. How can a driver manage understeer?
+    Trail-braking later, carrying less entry speed, using the kerbs, adjusting
+    brake bias/diff — and accepting slower corners. A setup/driver-behaviour
+    domain outside the model.
+
+290. How can a driver manage oversteer?
+    Earlier and smoother throttle application, steering corrections, softer
+    rear/diff adjustments. Same scope note.
+
+291. How does throttle application affect rear tyre temperature?
+    Power through the rear tyres adds slip and heat — aggressive throttle
+    management raises rear temps/wear; lift-and-coast cools them. The regen/
+    deployment logic in the energy model is throttle-coupled for exactly this
+    reason.
+
+292. How does braking affect front tyre temperature?
+    Braking loads the fronts, generating heat; heavy late braking spikes front
+    temps and wear. The energy model's push mode (late braking) reduces
+    harvested energy — the braking-style/regen coupling.
+
+--------------------------------------------------------------------------------
+ENERGY / HYBRID SYSTEMS
+--------------------------------------------------------------------------------
+
+293. What is an Energy Recovery System?
+    The hybrid system that captures energy (braking kinetic, formerly exhaust
+    heat) and stores it for later deployment — the MGU-K (+MGU-H in the old
+    era) and Energy Store. The platform synthesises its state because F1
+    doesn't broadcast it.
+
+294. What is MGU-K?
+    Motor Generator Unit–Kinetic — the electric machine on the drivetrain that
+    deploys and recovers kinetic energy (see 97).
+
+295. What is MGU-H?
+    Motor Generator Unit–Heat — the electric machine on the turbocharger that
+    recovered exhaust energy and spun the turbo (2014–2025 era); removed for
+    2026.
+
+296. What is an MGU?
+    Motor Generator Unit — a machine that converts between mechanical and
+    electrical energy; the K version handles kinetic energy, the H version
+    heat/exhaust energy.
+
+297. What is harvesting?
+    Regeneration: converting recovered energy (braking, lift-off, exhaust) into
+    stored electricity — bounded by the per-lap recharge cap and store
+    headroom in the model.
+
+298. What is deployment?
+    Discharging the store through the MGU-K to add power — bounded by the PU's
+    deploy ceiling, the store above the reserve, and (legacy era) the 4 MJ/lap
+    quota.
+
+299. What is state of charge?
+    The Energy Store's current energy level as a fraction of usable capacity
+    (SOC %); 4 MJ = 100% in the model, managed into a soft 30–80% band with a
+    10% reserve floor.
+
+300. What is energy clipping?
+    The MGU-K's power limit clamping electrical flow (deploy/recover) — the
+    model caps per-segment flow at the 120 kW rate (0.12 MJ/s), and the
+    sandbox warns when a request exceeds it.
+
+301. What is electrical energy deployment?
+    See 298 — using stored electricity through the MGU-K to augment the ICE,
+    typically on straights/acceleration; its time value is the s/MJ conversion.
+
+302. Where does recovered braking energy go?
+    Through the MGU-K into the Energy Store (bounded by the 4 MJ capacity and
+    the per-lap recharge cap); surplus beyond headroom is wasted as heat in
+    the friction brakes.
+
+303. Why can't a driver harvest unlimited energy?
+    Regulation (per-lap recharge caps: 8.5 MJ 2026 / 2 MJ legacy) and physics
+    (store capacity 4 MJ, MGU-K power, braking energy available).
+
+304. Why can't a driver deploy unlimited energy?
+    Regulation (deploy caps/quota), the store's capacity and the MGU-K power
+    limit (350 kW 2026 / 120 kW legacy), and the battery's management reserve.
+
+305. Why does ERS strategy matter for overtaking?
+    Deploying into an attack gives the extra pace to close and pass; a drained
+    battery leaves a car defenceless. The energy_diff feature links ERS state
+    to pass probability, and the ERS duels show deployment choices changing
+    the pass lap.
+
+306. Why might a driver save energy for a later lap?
+    To attack/defend in a late-race window, cover a tyre strategy, or answer a
+    rival's push — banking SOC early (lift & coast) buys a deployable surplus
+    when it matters. That's the liftcoast mode's logic.
+
+307. Why might deploying energy early be strategically superior?
+    To make a decisive pass, build a gap into clean air, or cover an
+    undercut — spending early is right when the immediate position gain
+    outweighs later battery shortage. Push mode explores that envelope; the
+    benchmark shows when it doesn't pay.
+
+308. How does battery state influence attack/defence strategy?
+    Attackers want SOC to deploy at the overtake moment; defenders want enough
+    to respond and to re-pass after DRS. The live call's chaser ERS lever and
+    the asymmetric ERS duels model exactly this asymmetry (leader Balanced vs
+    chaser Push).
+
+309. How does energy strategy differ between qualifying and the race?
+    Qualifying is all-out deployment over one or two laps (fresh battery,
+    no conservation); the race spreads a fixed 4 MJ store across 50+ laps
+    with modes. The platform is race-focused and starts the store FULL at
+    lights-out, matching race reality.
+
+310. How does energy management interact with DRS?
+    DRS cuts drag (free straight-line speed) while ERS adds power — the
+    strongest overtake combination; conversely, defending with DRS unavailable
+    needs battery. The model lacks a DRS feature so this interaction is only
+    implicit in the traces.
+
+--------------------------------------------------------------------------------
+HACKATHON-SPECIFIC
+--------------------------------------------------------------------------------
+
+311. Which problem statement are you solving?
+    "Energy & Overtake Intelligence — optimizing finite electrical energy
+    deployment while balancing immediate overtake opportunities against
+    long-term race performance and rule compliance" — the deck's stated
+    problem: raw telemetry tools show speed/RPM but not WHEN to push or how
+    much energy to conserve.
+
+312. Why did you choose this problem?
+    It is the genuinely hard, data-poor problem in F1 strategy (battery SOC
+    isn't broadcast), it has a clear measurable claim (the −1.8 s Monaco
+    improvement), and it showcases the differentiators: dual-agent modelling,
+    a what-if energy sandbox, and physics-guarded ML.
+
+313. What is the exact problem your system solves?
+    Given two cars racing (leader/chaser) and their context (tyres, fuel,
+    energy, track, lap), predict the battle outcome (closing rate, pass
+    probability, pass lap/sector) and recommend the ERS deployment mode and
+    pit strategy that minimises projected race time while respecting FIA
+    energy limits.
+
+314. Who is the intended user?
+    A race engineer / strategist on the pit wall: someone who needs fast,
+    explainable "what's the call?" decisions (overtake now? which energy mode?
+    which stop plan?) backed by data, not raw charts.
+
+315. Why does this problem matter to an F1 team?
+    Race-defining calls (pit windows, ERS deployment, overtake timing) are
+    worth tenths per lap and positions; teams spend heavily on exactly this
+    decision support. The platform demonstrates the ML + physics pipeline a
+    team would use.
+
+316. What is novel about your solution?
+    (1) Dual-agent overtake modelling — both cars' pace/tyre/fuel/energy
+    features enter one model, with speed-trace-aligned intra-lap gap movement;
+    (2) synthesising the missing battery SOC into a regulation-shaped ERS
+    simulator; (3) physics-guarded monotonic tyre/energy curves instead of
+    black boxes; (4) a re-runnable validation rig that reproduces the deck's
+    headline claim.
+
+317. What already exists that solves this problem?
+    Teams have proprietary simulators (with real car data we don't have);
+    public tools (FastF1, F1 stats sites) provide data but not strategy
+    inference. The differentiators are the dual-agent overtake framing, the
+    synthetic ERS layer and the explainable physics-guarded approach.
+
+318. Why is your solution better?
+    It is transparent (every number traceable to a model or a cited FIA rule),
+    fast (sub-second calls), deterministic (same DB → same result), and
+    validated against real races (backtests, calibration tiers, the −1.8 s
+    reproduction) — while being honest about what is synthetic.
+
+319. What is the strongest technical contribution?
+    The dual-agent overtake system: reconstructing head-to-head battles from
+    cumulative race clocks, feeding both cars' context to a closing-rate
+    regressor + pass classifier, and aligning the intra-lap gap path to the
+    two speed traces with sector-level pass probability — plus the backtest
+    rig that scores it against reality.
+
+320. What is the strongest F1 contribution?
+    The energy-vs-performance decision: a regulation-shaped ERS simulator that
+    answers "push, balance, or lift & coast?" per race and shows (reproducibly)
+    that a managed strategy beats flat-out by ~1.9 s in Monaco's closing phase
+    — with FIA compliance built into the feasibility rule.
+
+321. What data did you use?
+    FastF1 imports of race sessions across 2020–2026 (32 tracks, 5+ tyre
+    compounds, ~6,700 lap rows in the shipped schema dump), including per-lap
+    times, sectors, tyre compound/age, pit events, weather labels and sampled
+    telemetry; plus live UDP capture (F1 2017/2018) and researched tyre/PU
+    parameters.
+
+322. Where did the data come from?
+    Official F1 timing data via the FastF1 library (cached in f1_cache/),
+    stored into MySQL; the live feed is the F1 2017/2018 game's UDP telemetry;
+    tyre and PU parameters come from cited Pirelli/FIA/journalism sources.
+
+323. What data is real?
+    Lap times, sector times, validity, tyre compound/age, pit events, weather
+    labels, speed/throttle/brake traces, driver identities.
+
+324. What data is synthetic?
+    Fuel load (110 − 2·lap proxy), battery SOC and all ERS flows (energy
+    simulator), some sector splits (proxy thirds), per-track wear multipliers
+    (measured-relative + Pirelli-anchored), and every prediction.
+
+325. What assumptions did you make?
+    Fuel burns linearly at 2 kg/lap; the battery starts full and lives in a
+    30–80% band; regen can be estimated from sampled speed drops; deployment
+    is worth the track's measured s/MJ; tyre health declines linearly at
+    Pirelli rates; within-stint age slope = fuel; pit loss ≈22 s green/18 VSC/
+    14 SC/0 red; the leader is always Balanced in live calls.
+
+326. Which assumption is the weakest?
+    The energy-to-time conversion (0.35 s/MJ anchor scaled by full-throttle
+    share) — a crude order-of-magnitude constant driving every headline
+    energy number. Second: the synthetic fuel ramp. Both are clearly labelled
+    and the benchmark is deterministic so the numbers stay honest.
+
+327. What is the biggest limitation?
+    The synthetic-data dependence (fuel + battery + parts of tyre state are
+    modelled, not measured), compounded by a tiny overtake sample (26 labels)
+    and the absence of weather/track-temp/traffic/DRS features. The system is
+    a decision-support demonstration with honest uncertainty, not a team-grade
+    predictor.
+
+328. How would you validate this with an actual F1 team?
+    Provide them the validation rig: reproduce the Monaco claim, run the
+    race-call backtest and calibration scans on their own data, and compare
+    predicted pit laps / pass laps against their records — then swap the
+    synthetic fuel/energy layers for their real telemetry and re-train.
+
+329. What would you need from an F1 team to make this production-ready?
+    Real fuel-load traces, real battery SOC and PU energy data, tyre
+    temperatures/pressures, DRS and track-condition streams, a season of
+    labelled strategy decisions, and their validated lap-time baseline — then
+    recalibrate every synthetic constant and retrain.
+
+330. How would your system perform live during a Grand Prix?
+    It would ingest the live feed (or their telemetry), update lap/gap/tyre
+    state each lap, and serve sub-second "what's the call?" outputs (energy
+    mode, pit window, overtake read). The capture heartbeat, live sync button
+    and sub-second endpoints are built for exactly this; the synthetic layers
+    are the caveat.
+
+331. How quickly can your system produce a recommendation?
+    Sub-second: lap-time inference <5 ms, energy what-if and strategy
+    analysis in tens-to-hundreds of ms (sandbox ~284 ms), full-race replays in
+    seconds (models cached in-process, tree n_jobs pinned to 1).
+
+332. How accurate does the system need to be to be useful?
+    Relative decisions (stay out vs pit, mode A vs B, driver edge) are useful
+    at the model's error (MAE ~1.6 s/lap absolute, but deltas are far more
+    accurate because shared error cancels); a pass call is useful if
+    calibrated (the backtest's calibration buckets show when it is). Teams
+    would demand tighter absolute accuracy on their own data.
+
+333. What happens when your prediction is wrong?
+    The system exposes uncertainty (MAEs, significance verdicts, trust tiers,
+    calibration, precision/recall) and the UI is decision-support, so a wrong
+    call is a wrong recommendation a human can question — plus the backtest
+    tells you where the model is systematically wrong (e.g. Monaco pass calls).
+
+334. How does your system communicate uncertainty?
+    Numerically and textually: model MAEs in the driver list, significance
+    verdicts (significant/suggestive/inconclusive) on pace gaps, trust tiers
+    and sign-flip counts per race in calibration, precision/recall in the
+    backtest, feasibility flags on energy modes, and risk labels on strategy
+    plans.
+
+335. How do you prove that your recommendation is better than simply following the actual race strategy?
+    The energy benchmark compares AI strategy vs the Flat-Out baseline and
+    reproduces the deck's −1.8 s Monaco claim from stored race data; the
+    race-call backtest scores predictions against what really happened; the
+    fleet sweep extends the comparison to 115 stored races. Comparing against
+    the teams' ACTUAL strategies would require their strategic intent data —
+    not public.
+
+336. Can your system discover a strategy that the real team did not use?
+    Yes in principle: the DP stint optimizer and energy-mode sweep search the
+    plan space (stop count/laps/compounds/modes) and will recommend plans a
+    team didn't take (e.g. liftcoast on high-regen tracks). The benchmark
+    shows strategy modes varying per track that real teams didn't uniformly
+    use.
+
+337. Can your system explain *why* it recommends a strategy?
+    Yes — every recommendation carries a natural-language reason (wear cost vs
+    pit loss, SC discount, tyre cliff, undercut/overcut window), and the
+    underlying numbers (wear s/lap, pit loss, health %, battery %, MAEs) are
+    displayed. Linear models and the deterministic tyre/energy curves are
+    fully decomposable.
+
+338. How would a race engineer use your interface?
+    Watch the Dashboard (lap/tyre/energy charts), answer "what's the call?"
+    in Hammer Time with the live battle state (gap, tyres, ERS shape), check
+    the Energy Lab for mode feasibility, use the Strategy Advisor before each
+    stop window, and verify with the Validation panel — all within seconds
+    between laps.
+
+339. What would you remove from the UI if an engineer only had five seconds to make a decision?
+    Keep: the Race Call verdict (attack/attempt/no_window + pass lap), the
+    strategy recommendation (stay out/pit now/lap X + reason), and the current
+    tyre-health/battery readouts. Everything else (calendars, comparisons,
+    advanced modules) collapses into a details drawer.
+
+340. What is the single most important number displayed by your system?
+    The projected pass lap / cumulative P(overtake) in the Race Call when
+    attacking, or the recommended pit lap when defending — the single
+    actionable decision. If one number had to stand alone: the gap-to-ahead
+    vs the window (1.2 s), because it decides everything else.
+
+341. What happens if two strategies have almost identical predicted race times?
+    The system shows both with risk labels and the reason text; the engineer
+    picks by risk and track context (the advisor's risk layer already flags
+    plan viability). Formal indifference-zone handling (choose the less risky
+    within a tolerance) would be the upgrade.
+
+342. How does your system balance race time against risk?
+    Plans are scored on time AND risk (Low/Medium/High from stint-length
+    viability, wet-track suitability, cliff exposure); energy modes must be
+    feasible (battery above reserve); significance tiers stop over-reading
+    small gaps. There is no single risk-weighting knob yet.
+
+343. How would you prioritize energy, tyres and overtaking when they conflict?
+    The platform gives each its own layer (energy modes, tyre/stint plans,
+    overtake probability) and lets the human weigh them; the energy benchmark
+    shows the coupling (a battery-saving mode can enable the late attack). A
+    unified multi-objective optimiser is the explicit next step.
+
+344. Can your system optimize all three simultaneously?
+    Partially: the full-race replay already simulates ERS mode × overtake
+    jointly (per-lap energy_diff changes pass probabilities), and the strategy
+    advisor optimises tyres × pit losses; a joint energy × tyres × overtake
+    objective is not yet implemented.
+
+345. What is your optimization objective function?
+    For strategy: minimise projected remaining race time = Σ(pace offset +
+    wear cost) + Σ pit losses, subject to fresh-set inventory and (energy)
+    final battery above the reserve. For energy modes: minimise remaining
+    race time among feasible modes (final SOC > reserve + 0.05 MJ). Risk is a
+    soft constraint surfaced alongside cost.
+
+346. How would you extend the system from a historical simulator into a real-time race strategist?
+    Wire the live capture (already possible: live sync fills state), run the
+    models in-process on the streaming feed, re-evaluate the call every lap
+    (already sub-second), add SC/VSC-aware re-plans and a rolling optimisation
+    horizon, and log every recommendation to a predictions table for
+    post-race review.
+
+347. What would you build next if you had another month?
+    (1) Weather/track-temperature features and a wet-pace model; (2) joint
+    energy × tyre strategy optimisation; (3) DRS + dirty-air features for the
+    overtake model; (4) conformal confidence intervals; (5) a proper unit-test
+    suite; (6) Docker packaging; (7) more overtake training data (all stored
+    races, denser pair sampling).
+
+348. What would you build next if you had access to actual F1 team telemetry?
+    Replace the synthetic layers with real SOC/fuel/temperature data, learn
+    per-driver ERS deploy policies, calibrate s/MJ from real lap-time deltas,
+    add driver-behaviour (brake/throttle style) features, and re-validate the
+    overtake and strategy models against the team's actual decisions.
+
+349. Why should the judges trust your prediction?
+    Because every claim is testable: deterministic artifacts, committed
+    backtests (Monaco −1.8 s reproduced, fleet sweep of 115 races), the
+    race-call backtest with honest precision/recall, calibration trust tiers,
+    a drift check that fails loudly, and explicit labels on every synthetic
+    input. The system tells you when it's guessing and how wrong it can be.
+
+350. If you had to demonstrate only one feature in 60 seconds, what would you demonstrate?
+    The Hammer Time Race Call: pick two drivers (e.g. HAM vs VER on Monaco),
+    set the live battle state (gap slider, tyre state, chaser ERS shape),
+    press "WHAT'S THE CALL?" — and show the verdict with the projected pass
+    lap, cumulative probability and gap walk, then flip the chaser to Push vs
+    Lift & Coast to show the energy lever changing the call. It packages every
+    differentiator (dual-agent model, ERS layer, speed-trace alignment,
+    explainability) into one screen, and the Validation panel underneath
+    proves the numbers against the deck's claim.
+
+================================================================================
+END OF Q&A
+================================================================================

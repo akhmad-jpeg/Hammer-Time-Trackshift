@@ -6,15 +6,21 @@ import json
 import traceback
 import datetime
 import time
+import subprocess
+import tempfile
 from pathlib import Path
 from fuel_estimation import estimate_fuel_load
 from config import get_db_connection
 from stint_analysis import detrend_laps
+from tyre_degradation import (
+    tyre_health, tyre_cliff_penalty, HEALTH_FLOOR, track_abrasion,
+)
 from feature_pipeline import (
     construct_prediction_input,
     covered_tracks,
     covered_tyres,
     validate_model_inputs,
+    _normalise_track_name,
 )
 import driver_comparison
 import overtake_inference  # import-safe; models load lazily below
@@ -38,10 +44,19 @@ from energy_simulator import (
     LIMITED_LAP_PACE_EFFECTIVENESS,
     project_energy_trace,
     intra_lap_battery_curve,
+    resolve_track_profile,
+    normalize_track_name,
     _speed_drop_regen as regen_from_speed_samples,
 )
 
-app = Flask(__name__)
+# Frontend lives in scripts/dashboard/ (the former templates/ folder, which
+# now also carries the former static/ asset tree): Flask serves
+# dashboard.html from there, with assets under the /static URL.
+_FRONTEND_DIR = Path(__file__).resolve().parent / 'dashboard'
+app = Flask(__name__,
+            template_folder=str(_FRONTEND_DIR),
+            static_folder=str(_FRONTEND_DIR / 'static'),
+            static_url_path='/static')
 
 # ── ML model (loaded once at startup) ───────────────────────
 # Model artifacts always live in <project root>/ml_models so the dashboard
@@ -89,10 +104,13 @@ def track_pace_s_per_mj(track_name):
     """Measured per-track energy-to-time conversion (s/MJ) for a track.
 
     Falls back to the flat calibrated constant when the track is not in the
-    training profile.
+    training profile.  Name resolution is casefold + short/full-name alias
+    aware (energy_simulator.resolve_track_profile) so case-variant tracks
+    (Barcelona, Monza, Imola, Mugello) and short/full-name pairs (Monaco,
+    Miami) use their measured profile instead of silently falling back.
     """
     try:
-        pt = energy_pace['per_track'].get(str(track_name))
+        pt = resolve_track_profile(track_name, energy_pace.get('per_track', {}))
         if pt and pt.get('pace_s_per_mj'):
             return float(pt['pace_s_per_mj'])
     except Exception:
@@ -108,7 +126,7 @@ def track_sector_profile(track_name):
     else 'proxy_thirds'.
     """
     try:
-        pt = energy_pace['per_track'].get(str(track_name))
+        pt = resolve_track_profile(track_name, energy_pace.get('per_track', {}))
         sh = pt.get('sector_time_share') if pt else None
         src = pt.get('sector_share_source') if pt else 'proxy_thirds'
         if sh and len(sh) == 3 and abs(sum(sh) - 1.0) < 1e-3:
@@ -121,7 +139,7 @@ def track_sector_profile(track_name):
 def track_sector_pace(track_name):
     """Per-sector s/MJ values for a track (falls back to the track pace)."""
     try:
-        pt = energy_pace['per_track'].get(str(track_name))
+        pt = resolve_track_profile(track_name, energy_pace.get('per_track', {}))
         if pt and pt.get('sector_pace_s_per_mj'):
             return [float(x) for x in pt['sector_pace_s_per_mj']]
     except Exception:
@@ -542,6 +560,39 @@ def get_tyre_degradation(session_id):
         # Fuel-adjusted degradation: stint_delta is each lap's time relative
         # to its own stint's pace line (fuel burn removed).
         deg = detrend_laps(deg)
+
+        # Pirelli-style tyre-health model (scripts/tyre_degradation.py):
+        # deterministic health % from (compound, tyre age, track abrasion),
+        # the y axis of the dashboard's Tyre Degradation chart.
+        cursor.execute("SELECT track_name FROM sessions WHERE session_id = %s",
+                       (session_id,))
+        _srow = cursor.fetchone()
+        _track = _srow['track_name'] if _srow else None
+        _prev_key = None
+        for d in deg:
+            _key = (d.get('tyre_compound'), d.get('tyre_age'))
+            # A lap should not draw a health point when:
+            #  * there is no tyre data (missing compound/age), or
+            #  * the (compound, age) is STUCK unchanged from the previous
+            #    lap (impossible — age must advance every lap), or
+            #  * the tyre has reached the extreme-gamble floor (health
+            #    would print <= HEALTH_FLOOR).  Real F1 tyres are never run
+            #    to the floor: teams pit 1-2 laps before the 40-50% cliff,
+            #    so a stint pinned at 10% for 10+ laps is the data's
+            #    "tyres run to the flag" no-pit artifact, not rubber that
+            #    stopped degrading.  Rendering those laps as a GAP (instead
+            #    of a flat line at the bottom) means the curve drops
+            #    through the pit window and the cliff, then ends — no fake
+            #    "went to 0%" plateau, no impossible horizontal line.
+            _health = tyre_health(d.get('tyre_compound'), d.get('tyre_age'),
+                                  _track)
+            if (d.get('tyre_compound') is None or d.get('tyre_age') is None
+                    or _key == _prev_key or _health is None
+                    or _health <= HEALTH_FLOOR):
+                d['tyre_health_pct'] = None
+            else:
+                d['tyre_health_pct'] = _health
+            _prev_key = _key
         return jsonify(deg)
     except Exception as e:
         traceback.print_exc()
@@ -1043,38 +1094,11 @@ def _driver_inventory(session_id, driver_id, conn):
 # Multiplies the nominal wear curves above.  1.0 = a "medium" circuit;
 # abrasive / high-degradation venues (Bahrain, Jeddah, Singapore-style
 # street races) wear tyres faster, smooth low-degradation venues
-# (Silverstone, Sochi, Monza, Red Bull Ring) slower.  Magnitudes follow
-# Pirelli's per-race compound selection and race-day stint analysis; any
-# circuit not listed defaults to 1.0.
-TRACK_ABRASION = {
-    'Bahrain International Circuit': 1.25,
-    'Jeddah Corniche Circuit': 1.20,
-    'Marina Bay': 1.30,
-    'Miami Gardens': 1.15,
-    'Suzuka International Racing Course': 1.15,
-    'Circuit De Barcelona-Catalunya': 1.15,
-    'Autodromo Internazionale Enzo E Dino Ferrari': 1.20,
-    'Hungaroring': 1.10,
-    'Yas Island': 1.05,
-    'Baku City Circuit': 1.05,
-    'Autódromo Hermanos Rodríguez': 1.10,
-    'Circuit De Monaco': 1.15,
-    'Silverstone Circuit': 0.90,
-    'Sochi Autodrom': 0.90,
-    'Autodromo Nazionale Di Monza': 0.95,
-    'Spa-Francorchamps': 0.95,
-    'Circuit Zandvoort': 0.95,
-    'Shanghai International Circuit': 1.00,
-    'Red Bull Ring': 0.90,
-}
-
-
-def _track_abrasion(track):
-    """Wear multiplier for a circuit (1.0 when unlisted / unknown).  With a
-    retrained model it scales the measured per-compound slopes per track
-    (_measured_slope); it only scales the researched fallback curve when no
-    measured slopes exist (pre-retrain model)."""
-    return TRACK_ABRASION.get(str(track).strip().title(), 1.0)
+# (Silverstone, Sochi, Monza, Red Bull Ring) slower.  The abrasion map itself
+# lives in scripts/tyre_degradation.py (TRACK_ABRASION / track_abrasion),
+# the single source of truth also used by the dashboard's tyre-health chart;
+# `track_abrasion` resolves aliases / casing, so 'Monaco' and
+# 'Circuit de Monaco' agree.
 
 
 # Cap on the per-lap wear penalty (s/lap) — beyond it a set is simply dead;
@@ -1092,7 +1116,7 @@ def _measured_slope(tyre, track=None):
         return None
     s = max(MEASURED_SLOPE_FLOOR.get(tyre, 0.03),
             min(MEASURED_SLOPE_CAP, float(MEASURED_COMPOUND_SLOPE[tyre])))
-    return s * (_track_abrasion(track) if track else 1.0)
+    return s * track_abrasion(track)
 
 
 def _wear_per_lap(tyre, age, track=None):
@@ -1101,17 +1125,24 @@ def _wear_per_lap(tyre, age, track=None):
     With a retrained model this is the measured per-compound slope times age
     (capped at MAX_WEAR_PENALTY).  Without one it falls back to the
     researched piecewise curve — managed phase then the post-knee cliff.
+    On TOP of either, the Pirelli performance cliff adds 1.5-2.5 s/lap once
+    the set falls below 40% health (tyre_cliff_penalty), so the stint
+    optimizer is pushed to pit before the cliff rather than nurse a clapped
+    set home.
     """
+    base = 0.0
     slope = _measured_slope(tyre, track)
     if slope is not None:
-        return min(slope * age, MAX_WEAR_PENALTY)
-    spec = TYRE_WEAR.get(tyre)
-    if not spec:
-        return 0.0
-    f = _track_abrasion(track) if track else 1.0
-    knee, s1, s2 = spec['knee'], spec['s1'], spec['s2']
-    s1f, s2f = f * s1, f * s2
-    return s1f * age if age <= knee else s1f * knee + s2f * (age - knee)
+        base = min(slope * age, MAX_WEAR_PENALTY)
+    else:
+        spec = TYRE_WEAR.get(tyre)
+        if spec:
+            f = track_abrasion(track)
+            knee, s1, s2 = spec['knee'], spec['s1'], spec['s2']
+            s1f, s2f = f * s1, f * s2
+            base = (s1f * age if age <= knee
+                    else s1f * knee + s2f * (age - knee))
+    return base + tyre_cliff_penalty(tyre, age, track)
 
 
 def _life_laps(tyre, track=None):
@@ -1124,7 +1155,7 @@ def _life_laps(tyre, track=None):
     spec = TYRE_WEAR.get(tyre)
     if not spec:
         return TYRE_LIFE.get(tyre, 30)
-    f = _track_abrasion(track) if track else 1.0
+    f = track_abrasion(track)
     knee, s1, s2 = spec['knee'], spec['s1'], spec['s2']
     s1f, s2f = f * s1, f * s2
     knee_pen = s1f * knee
@@ -1154,7 +1185,13 @@ def _stint_time(tyre, start_age, laps, track, start_lap_number, year=None):
     bucket (the season's pace level).
     """
     tf = f'tyre_{tyre}'
-    tkf = f'track_{track}'
+    # The one-hot feature names are Title Case (the training pipeline
+    # normalizes track names via _normalise_track_name, which
+    # construct_prediction_input also applies internally).  Normalizing here
+    # too keeps the guard honest — 'Autodromo Nazionale di Monza' from the DB
+    # must map to 'track_Autodromo Nazionale Di Monza', not silently return
+    # 0.0 and blank out the whole strategy advisor.
+    tkf = f'track_{_normalise_track_name(track)}'
     if tf not in feature_names or tkf not in feature_names or laps <= 0:
         return 0.0
     total = 0.0
@@ -3054,6 +3091,242 @@ def _simulate_battle(leader_code, chaser_code, track_name, lap_number,
         "ended": "pass" if pass_lap else ("blown_open" if gap > BATTLE_END_GAP_S else "ran_out"),
         "final_gap_s": round(gap, 2),
     }
+
+
+# ── DECK VALIDATION — energy strategy benchmark artifact ────────────────
+# The deck's headline "−1.8s race time improvement vs Flat-Out" (2023 Monaco)
+# is produced by scripts/benchmark_energy_strategy.py and committed as
+# backtests/monaco_2023_energy.json.  These endpoints serve that artifact
+# (plus a "re-run" action that regenerates it in a subprocess) so the number
+# shown in the UI is always the script's output, never a hard-coded figure.
+BENCHMARK_ARTIFACT = PROJECT_ROOT / 'backtests' / 'monaco_2023_energy.json'
+BENCHMARK_SCRIPT = PROJECT_ROOT / 'scripts' / 'benchmark_energy_strategy.py'
+BENCHMARK_FLEET_SCRIPT = PROJECT_ROOT / 'scripts' / 'benchmark_energy_fleet.py'
+BENCHMARK_FLEET_SUMMARY = PROJECT_ROOT / 'backtests' / 'energy_fleet_summary.json'
+BENCHMARK_ARTIFACTS_DIR = PROJECT_ROOT / 'backtests' / 'energy'
+
+
+def _load_energy_benchmark_artifact():
+    if not BENCHMARK_ARTIFACT.exists():
+        raise FileNotFoundError(
+            "Benchmark artifact missing — run scripts/benchmark_energy_strategy.py "
+            "first (or use the re-run action).")
+    return json.loads(BENCHMARK_ARTIFACT.read_text(encoding='utf-8'))
+
+
+def _energy_benchmark_source():
+    return {
+        'artifact': BENCHMARK_ARTIFACT.relative_to(PROJECT_ROOT).as_posix(),
+        'script': 'scripts/benchmark_energy_strategy.py',
+        'mtime_iso': datetime.datetime.fromtimestamp(
+            BENCHMARK_ARTIFACT.stat().st_mtime).isoformat(timespec='seconds'),
+    }
+
+
+@app.route('/api/benchmark/energy')
+def api_energy_benchmark():
+    """The committed 2023 Monaco energy benchmark (deck's −1.8s claim)."""
+    try:
+        data = _load_energy_benchmark_artifact()
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Benchmark artifact unreadable"}), 500
+    data['_source'] = _energy_benchmark_source()
+    return jsonify(data)
+
+
+@app.route('/api/benchmark/energy/run', methods=['POST'])
+def api_energy_benchmark_run():
+    """Re-run the benchmark in a subprocess, then return the fresh artifact.
+
+    No query params: the deck anchor (Monaco 2023, backtests/monaco_2023_
+    energy.json).  With ?track=<name>&year=<yyyy>: that race's artifact
+    (regenerated via the fleet script scoped to the track, writing the full
+    per-race file under backtests/energy/).  Deterministic, so a re-run only
+    changes the artifact when the simulator / DB / models actually moved.
+    """
+    track = (request.args.get('track') or '').strip()
+    year = request.args.get('year', type=int)
+    if track and not year:
+        return jsonify({"error": "year is required with track"}), 400
+
+    if not track:
+        # Deck anchor: the single-race CLI writes the canonical artifact.
+        if not BENCHMARK_SCRIPT.exists():
+            return jsonify({"error": f"Benchmark script missing: {BENCHMARK_SCRIPT}"}), 500
+        cmd = [sys.executable, str(BENCHMARK_SCRIPT)]
+        out_file = BENCHMARK_ARTIFACT
+        timeout = 300
+    else:
+        # Race-scoped: fleet script with a throwaway summary path so the
+        # committed fleet summary is never clobbered by a scoped run.
+        if not BENCHMARK_FLEET_SCRIPT.exists():
+            return jsonify({"error": f"Fleet script missing: {BENCHMARK_FLEET_SCRIPT}"}), 500
+        cmd = [sys.executable, str(BENCHMARK_FLEET_SCRIPT),
+               '--track', track, '--year', str(year),
+               '--out', str(Path(tempfile.gettempdir()) / '_scoped_summary_tmp.json')]
+        out_file = None   # resolved after the run
+        timeout = 300
+    try:
+        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT),
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Benchmark timed out"}), 500
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip()[-2000:]
+        return jsonify({"error": f"Benchmark failed (exit {proc.returncode}): {tail}"}), 500
+    try:
+        if track:
+            out_file = _race_artifact_path_for(track, year)
+        data = json.loads(out_file.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return jsonify({"error": "Benchmark ran but the race artifact is missing — "
+                                 "rebuild the fleet summary first"}), 500
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Benchmark ran but the artifact is unreadable"}), 500
+    data['_source'] = _energy_benchmark_source()
+    data['_source']['artifact'] = out_file.relative_to(PROJECT_ROOT).as_posix()
+    data['_source']['mtime_iso'] = datetime.datetime.fromtimestamp(
+        out_file.stat().st_mtime).isoformat(timespec='seconds')
+    data['_source']['stdout_tail'] = proc.stdout.strip()[-3000:]
+    return jsonify(data)
+
+
+def _race_artifact_path_for(track, year):
+    """Path of the full per-race artifact for (track, year)."""
+    summary = json.loads(BENCHMARK_FLEET_SUMMARY.read_text(encoding='utf-8'))
+    n_t = normalize_track_name(track)
+    rows = [r for r in summary.get('races', [])
+            if normalize_track_name(r['track']) == n_t
+            and r['year'] == str(year)]
+    if not rows:
+        raise FileNotFoundError(f"No race for track={track!r} year={year}")
+    row = max(rows, key=lambda r: r['date'])
+    return BENCHMARK_ARTIFACTS_DIR / f"{row['key']}.json"
+
+
+@app.route('/api/benchmark/energy/fleet')
+def api_energy_benchmark_fleet():
+    """The committed fleet summary + index of regenerated per-race artifacts."""
+    if not BENCHMARK_FLEET_SUMMARY.exists():
+        return jsonify({"error": "Fleet summary missing — run "
+                                 "scripts/benchmark_energy_fleet.py first"}), 404
+    try:
+        data = json.loads(BENCHMARK_FLEET_SUMMARY.read_text(encoding='utf-8'))
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Fleet summary unreadable"}), 500
+    artifacts = sorted(p.stem for p in BENCHMARK_ARTIFACTS_DIR.glob('*.json')) \
+        if BENCHMARK_ARTIFACTS_DIR.exists() else []
+    data['_source'] = {
+        'artifact': 'backtests/energy_fleet_summary.json',
+        'script': 'scripts/benchmark_energy_fleet.py',
+        'mtime_iso': datetime.datetime.fromtimestamp(
+            BENCHMARK_FLEET_SUMMARY.stat().st_mtime).isoformat(timespec='seconds'),
+        'race_artifacts': len(artifacts),
+        'race_keys': artifacts,
+    }
+    return jsonify(data)
+
+
+@app.route('/api/benchmark/energy/fleet/run', methods=['POST'])
+def api_energy_benchmark_fleet_run():
+    """Re-run the whole fleet sweep (~seconds) and return the fresh summary."""
+    if not BENCHMARK_FLEET_SCRIPT.exists():
+        return jsonify({"error": f"Fleet script missing: {BENCHMARK_FLEET_SCRIPT}"}), 500
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(BENCHMARK_FLEET_SCRIPT)],
+            cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Fleet benchmark timed out after 300s"}), 500
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip()[-2000:]
+        return jsonify({"error": f"Fleet benchmark failed (exit {proc.returncode}): {tail}"}), 500
+    return api_energy_benchmark_fleet()
+
+
+@app.route('/api/benchmark/energy/race')
+def api_energy_benchmark_race():
+    """Full per-race artifact by its key (Monaco__2023-05-28 etc.)."""
+    key = (request.args.get('key') or '').strip()
+    if not key:
+        return jsonify({"error": "Missing field: key"}), 400
+    path = BENCHMARK_ARTIFACTS_DIR / f"{key}.json"
+    if not path.exists():
+        return jsonify({"error": f"Race artifact '{key}' missing — run the "
+                                 f"fleet sweep or re-run this race first"}), 404
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Race artifact unreadable"}), 500
+    data['_source'] = {
+        'artifact': f"backtests/energy/{key}.json",
+        'script': 'scripts/benchmark_energy_fleet.py',
+        'mtime_iso': datetime.datetime.fromtimestamp(
+            path.stat().st_mtime).isoformat(timespec='seconds'),
+    }
+    # Link the two panels: annotate every driver with the tyre health at the
+    # START of the closing-phase window (the same Pirelli-style model the
+    # main dashboard's Tyre Degradation chart plots), so the validation rows
+    # can be coloured by how much tyre life the strategy projection assumes.
+    try:
+        _annotate_closing_tyre_health(data)
+    except Exception:
+        traceback.print_exc()  # never fail the endpoint on an annotation issue
+    return jsonify(data)
+
+
+def _annotate_closing_tyre_health(data):
+    """Add closing_tyre_health_pct / compound / age to each benchmark session.
+
+    Closing window = the artifact's final `closing_laps` laps; the health is
+    read at that window's first lap from the stored laps table (compound +
+    tyre age at that lap -> tyre_health).  Drivers without that lap in the
+    DB are left unannotated (None), which the UI renders grey.
+    """
+    cfg = data.get('config') or {}
+    close_laps = int(cfg.get('closing_laps') or 15)
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        for s in data.get('sessions') or []:
+            laps = (s.get('per_lap') or {}).get('lap') or []
+            if not laps or close_laps <= 0:
+                continue
+            start_lap = laps[max(0, len(laps) - close_laps)]
+            session_id = s.get('session_id')
+            if not session_id:
+                continue
+            cursor.execute("""
+                SELECT lap_number, tyre_compound, tyre_age
+                FROM laps
+                WHERE session_id = %s AND lap_time_ms > 0
+                  AND tyre_compound IS NOT NULL AND tyre_age IS NOT NULL
+                ORDER BY ABS(lap_number - %s) ASC, lap_number ASC
+                LIMIT 1
+            """, (session_id, start_lap))
+            row = cursor.fetchone()
+            if not row:
+                continue
+            s['closing_tyre_health_pct'] = tyre_health(
+                row['tyre_compound'], row['tyre_age'], s.get('track_name'))
+            s['closing_tyre_compound'] = row['tyre_compound']
+            s['closing_tyre_age'] = row['tyre_age']
+            s['closing_phase_start_lap'] = start_lap
+    finally:
+        if cursor:
+            try: cursor.close()
+            except: pass
+        if conn:
+            try: conn.close()
+            except: pass
 
 
 def clickable(url, text=None):

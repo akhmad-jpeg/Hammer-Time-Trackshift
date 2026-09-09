@@ -143,10 +143,11 @@
                 <canvas id="lapChart" style="display:none"></canvas>
             </div>
             <div class="chart-card">
-                <div class="chart-title">Stint Pace Residuals</div>
+                <div class="chart-title">Tyre Degradation — Health</div>
                 <div id="tyreNoData" class="no-data">SELECT A SESSION</div>
+                <div class="tyre-legend" id="tyreLegend" style="display:none"><span class="tl-lbl">COMPOUND</span><span class="tl-item"><span class="tl-dot" style="background:#ff4444"></span>SOFT</span><span class="tl-item"><span class="tl-dot" style="background:#ffd700"></span>MEDIUM</span><span class="tl-item"><span class="tl-dot" style="background:#f5f5f5"></span>HARD</span><span class="tl-item"><span class="tl-dot" style="background:#00c853"></span>INTER</span><span class="tl-item"><span class="tl-dot" style="background:#1e88e5"></span>WET</span><span class="tl-item tl-pit">◆ PIT</span></div>
                 <canvas id="tyreChart" style="display:none"></canvas>
-                <div class="chart-note" id="tyreChartNote" style="display:none">After removing the linear fuel/trend effect per stint — does not isolate tyre wear. Pit-in/pit-out laps are excluded from the plot.</div>
+                <div class="chart-note" id="tyreChartNote" style="display:none">Pirelli-style tyre-health model (scripts/tyre_degradation.py): 100% on a fresh set, declining <b>linearly</b> at the <b>per-track measured</b> loss rate — measured from stored race stints (scripts/measure_tyre_wear.py: within-stint lap drift, fuel-corrected, shrunk toward the Pirelli base — Soft ≈ 4.5% · Medium ≈ 2.25% · Hard ≈ 1.35% /lap). Abrasive venues (Bahrain, Barcelona) burn tyres ~1.4× the fleet average; smooth ones (Monaco, Silverstone) ~0.7×. The gold band is the <b>pit window</b> (40–50% health) — teams stop 1–2 laps before the performance cliff below it. The curve <b>ends</b> (gaps) at the 10% extreme-gamble floor — a real stint never sits there, because teams pit before the cliff. Gold diamonds = pit laps — a stop resets the curve. Sources: Pirelli race notes · Flow Racers · F1 Chronicle · measured stints.</div>
             </div>
         </div>
         <div>
@@ -420,10 +421,14 @@
                 </div>
                 <div class="ht-state-grp">
                     <div class="grp-label">TYRE STATE — RIGHT NOW</div>
-                    <div class="field"><label>Leader tyre</label><select id="ov-ltyre"></select></div>
-                    <div class="field"><label>Leader tyre age (laps)</label><input type="number" id="ov-lage" min="0" value="12"></div>
-                    <div class="field"><label>Chaser tyre</label><select id="ov-ctyre"></select></div>
-                    <div class="field"><label>Chaser tyre age (laps)</label><input type="number" id="ov-cage" min="0" value="8"></div>
+                    <div class="two-col ht-cols" style="gap:12px;margin-bottom:14px">
+                        <div class="field" style="margin:0"><label>Leader tyre compound</label><select id="ov-ltyre"></select></div>
+                        <div class="field" style="margin:0"><label>Leader tyre age (laps)</label><input type="number" id="ov-lage" min="0" value="12"></div>
+                    </div>
+                    <div class="two-col ht-cols" style="gap:12px">
+                        <div class="field" style="margin:0"><label>Chaser tyre compound</label><select id="ov-ctyre"></select></div>
+                        <div class="field" style="margin:0"><label>Chaser tyre age (laps)</label><input type="number" id="ov-cage" min="0" value="8"></div>
+                    </div>
                 </div>
                 <div class="ht-state-grp">
                     <div class="grp-label">CHASER ENERGY SHAPE (LEADER ASSUMED BALANCED)</div>
@@ -457,12 +462,6 @@
         </div>
     </div>
 
-    <!-- PRIMARY ACTIONS — deeper levels of analysis -->
-    <div class="ht-actions">
-        <button type="button" class="ht-action" onclick="htOpenModule('ht-fullrace')"><span class="ha-t">REPLAY RACE</span><span class="ha-s">Full-race simulation to the flag</span></button>
-        <button type="button" class="ht-action" onclick="htOpenModule('ht-tuner')"><span class="ha-t">TUNE BATTLE</span><span class="ha-s">What-if tyre / fuel / energy on this battle</span></button>
-        <button type="button" class="ht-action" onclick="htOpenModule('ht-energylab')"><span class="ha-t">ENERGY LAB</span><span class="ha-s">Deployment modes &amp; sector sandbox</span></button>
-    </div>
 
     <!-- MODULE 02 · FULL-RACE REPLAY (advanced; folded by default) -->
     <div class="ht-mod" id="ht-fullrace">
@@ -665,6 +664,60 @@
                     <div class="err-box" id="sb-err"></div>
                     <div id="sb-out"></div>
             </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODULE 05 · VALIDATION — energy benchmark, any stored race (folded by default) -->
+    <div class="ht-mod" id="ht-validation">
+        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-validation',this)">
+            <span class="ht-idx">05</span>
+            <span class="ht-titles">
+                <span class="ht-title">Validation <span class="ht-adv">ENERGY BENCHMARK</span></span>
+                <span class="ht-sub">AI strategy vs 'Flat-Out' on any stored race · fleet summary · the deck's Monaco −1.8s claim, re-runnable</span>
+            </span>
+            <span class="ht-chev" aria-hidden="true">▾</span>
+        </button>
+        <div class="ht-body">
+            <div class="ht-subcard">
+                <div class="grp-label">RACE — WHICH BENCHMARK</div>
+                <div class="two-col ht-cols" style="gap:12px">
+                    <div class="field" style="margin:0">
+                        <label>Track</label>
+                        <select id="bm-track" onchange="bmYearOptions()"><option value="">Loading tracks…</option></select>
+                    </div>
+                    <div class="field" style="margin:0">
+                        <label>Season</label>
+                        <select id="bm-year" onchange="bmSelectRace()"><option value="">—</option></select>
+                    </div>
+                </div>
+                <div class="chart-note" style="margin:8px 0 10px">Every stored race with ≥25 timed laps is benchmarked by the fleet sweep (<b>scripts/benchmark_energy_fleet.py</b>, <code>backtests/energy_fleet_summary.json</code>). Monaco 2023 is the deck anchor and carries the reproduction badge.</div>
+
+                <div class="grp-label">HEADLINE — <span id="bm-race-label">…</span></div>
+                <div id="bm-energy-out">
+                    <div class="chart-note">Loading benchmark…</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px">
+                    <button class="action-btn" style="width:auto;margin:0" onclick="rerunEnergyBenchmark(this)">⟳ RE-RUN BENCHMARK</button>
+                    <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="bmReload()">RELOAD</button>
+                    <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" id="bm-fleet-btn" onclick="rebuildFleetSummary(this)">⟳ REBUILD FLEET SUMMARY</button>
+                    <span style="font-size:0.64em;color:#667" id="bm-energy-meta"></span>
+                </div>
+                <div class="err-box" id="bm-energy-err" style="display:none"></div>
+                <div class="chart-card" style="height:300px;margin-top:14px;display:none" id="bm-energy-chart-card">
+                    <canvas id="bmEnergyChart"></canvas>
+                </div>
+                <details class="ht-hint" style="margin-top:12px">
+                    <summary>ⓘ What this validates</summary>
+                    <p>Reproduces the Trackshift deck's page-8 headline — "<b>1.8s race time improvement</b>" of the AI strategy vs a 'Flat-Out' baseline, 2023 Monaco GP — and extends the same projection to <b>every stored race</b>. Flat-Out = the <i>push</i> mode (full deploy ceiling, battery to the floor, then energy-limited); AI strategy = the fastest mode that finishes above the battery reserve (mode differs per track — <i>balanced</i> on Monaco, <i>liftcoast</i> on high-regen tracks). Closing phase = the final 15 laps; on Monaco 2023 that mean lands at −1.88s (reproduced ✓ vs the deck's −1.8s), while the honest full-race projection is ≈ −9.4s — the deck number is conservative and this panel shows exactly which window produces it. Pace credit = the track's <b>measured</b> s/MJ × deployed MJ (name-alias/case aware, so no track silently falls back to the flat constant); the shared baseline lap time cancels out of every delta. <b>RE-RUN BENCHMARK</b> regenerates the selected race (~seconds, deterministic — same DB yields the same numbers) and <b>REBUILD FLEET SUMMARY</b> re-sweeps all stored races, so the figures can never go stale.</p>
+                </details>
+            </div>
+
+            <div class="ht-subcard" style="margin-top:14px">
+                <div class="grp-label">FLEET SUMMARY — WHERE THE STRATEGY GAINS ARE LARGEST <span style="color:#667;font-weight:400">(all stored races, biggest gain first)</span></div>
+                <div id="bm-fleet-out">
+                    <div class="chart-note">Loading fleet summary…</div>
+                </div>
             </div>
         </div>
     </div>

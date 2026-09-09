@@ -1,0 +1,2771 @@
+{
+ "meta": {
+  "script": "scripts/benchmark_energy_fleet.py",
+  "generated_at": "2026-09-08T21:56:57",
+  "command": "scripts/benchmark_energy_fleet.py",
+  "method": "same projection as scripts/benchmark_energy_strategy.py \u2014 per-lap credits = measured s/MJ x deployed MJ; strategy = fastest feasible mode; closing phase = final --closing-laps laps",
+  "track_name_resolution": "casefold + short/full alias aware (energy_simulator.resolve_track_profile)"
+ },
+ "config": {
+  "closing_laps": 15,
+  "flat_out_mode": "push"
+ },
+ "races": [
+  {
+   "key": "Red_Bull_Ring__2026-06-28",
+   "track": "Red Bull Ring",
+   "date": "2026-06-28",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -12.853,
+   "full_race_improvement_s_mean": -57.439
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2026-09-06",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2026-09-06",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 50,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -10.041,
+   "full_race_improvement_s_mean": -32.214
+  },
+  {
+   "key": "Circuit_Gilles_Villeneuve__2026-05-24",
+   "track": "Circuit Gilles Villeneuve",
+   "date": "2026-05-24",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 68,
+   "pace_s_per_mj": 0.4108,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -9.148,
+   "full_race_improvement_s_mean": -35.785
+  },
+  {
+   "key": "Suzuka_International_Racing_Course__2026-03-29",
+   "track": "Suzuka International Racing Course",
+   "date": "2026-03-29",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 51,
+   "pace_s_per_mj": 0.3711,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -9.049,
+   "full_race_improvement_s_mean": -29.181
+  },
+  {
+   "key": "Spa-Francorchamps__2026-07-19",
+   "track": "Spa-Francorchamps",
+   "date": "2026-07-19",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 41,
+   "pace_s_per_mj": 0.4435,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -8.808,
+   "full_race_improvement_s_mean": -23.525
+  },
+  {
+   "key": "Miami_Gardens__2026-05-03",
+   "track": "Miami Gardens",
+   "date": "2026-05-03",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3771,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -6.843,
+   "full_race_improvement_s_mean": -26.116
+  },
+  {
+   "key": "Silverstone_Circuit__2026-07-05",
+   "track": "Silverstone Circuit",
+   "date": "2026-07-05",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -6.601,
+   "full_race_improvement_s_mean": -20.83
+  },
+  {
+   "key": "Hungaroring__2026-07-26",
+   "track": "Hungaroring",
+   "date": "2026-07-26",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -6.308,
+   "full_race_improvement_s_mean": -28.942
+  },
+  {
+   "key": "Sochi_Autodrom__2021-09-26",
+   "track": "Sochi Autodrom",
+   "date": "2021-09-26",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.4979,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -6.161,
+   "full_race_improvement_s_mean": -19.995
+  },
+  {
+   "key": "Shanghai_International_Circuit__2026-03-15",
+   "track": "Shanghai International Circuit",
+   "date": "2026-03-15",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 54,
+   "pace_s_per_mj": 0.3366,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -6.059,
+   "full_race_improvement_s_mean": -20.826
+  },
+  {
+   "key": "Red_Bull_Ring__2020-07-05",
+   "track": "Red Bull Ring",
+   "date": "2020-07-05",
+   "year": "2020",
+   "drivers": [
+    "HAM"
+   ],
+   "sessions": 1,
+   "laps": 66,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.61,
+   "full_race_improvement_s_mean": -23.199
+  },
+  {
+   "key": "Sochi_Autodrom__2020-09-27",
+   "track": "Sochi Autodrom",
+   "date": "2020-09-27",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 49,
+   "pace_s_per_mj": 0.4979,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.546,
+   "full_race_improvement_s_mean": -16.878
+  },
+  {
+   "key": "Red_Bull_Ring__2024-06-30",
+   "track": "Red Bull Ring",
+   "date": "2024-06-30",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.397,
+   "full_race_improvement_s_mean": -24.622
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2021-09-12",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2021-09-12",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 25,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.396,
+   "full_race_improvement_s_mean": -12.494
+  },
+  {
+   "key": "Spa-Francorchamps__2023-07-30",
+   "track": "Spa-Francorchamps",
+   "date": "2023-07-30",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 44,
+   "pace_s_per_mj": 0.4435,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.386,
+   "full_race_improvement_s_mean": -14.651
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2023-09-03",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2023-09-03",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 51,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.343,
+   "full_race_improvement_s_mean": -17.517
+  },
+  {
+   "key": "Spa-Francorchamps__2020-08-30",
+   "track": "Spa-Francorchamps",
+   "date": "2020-08-30",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 40,
+   "pace_s_per_mj": 0.4435,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.343,
+   "full_race_improvement_s_mean": -13.432
+  },
+  {
+   "key": "Red_Bull_Ring__2023-07-02",
+   "track": "Red Bull Ring",
+   "date": "2023-07-02",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.337,
+   "full_race_improvement_s_mean": -22.903
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2025-09-07",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2025-09-07",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.328,
+   "full_race_improvement_s_mean": -17.977
+  },
+  {
+   "key": "Spa-Francorchamps__2024-07-28",
+   "track": "Spa-Francorchamps",
+   "date": "2024-07-28",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 44,
+   "pace_s_per_mj": 0.4435,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.327,
+   "full_race_improvement_s_mean": -14.705
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2024-09-01",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2024-09-01",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.315,
+   "full_race_improvement_s_mean": -17.941
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2020-09-06",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2020-09-06",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 50,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.308,
+   "full_race_improvement_s_mean": -12.994
+  },
+  {
+   "key": "Spa-Francorchamps__2025-07-27",
+   "track": "Spa-Francorchamps",
+   "date": "2025-07-27",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 41,
+   "pace_s_per_mj": 0.4435,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.308,
+   "full_race_improvement_s_mean": -13.356
+  },
+  {
+   "key": "Spa-Francorchamps__2022-08-28",
+   "track": "Spa-Francorchamps",
+   "date": "2022-08-28",
+   "year": "2022",
+   "drivers": [
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 42,
+   "pace_s_per_mj": 0.4435,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.269,
+   "full_race_improvement_s_mean": -13.986
+  },
+  {
+   "key": "Baku_City_Circuit__2021-06-06",
+   "track": "Baku City Circuit",
+   "date": "2021-06-06",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 44,
+   "pace_s_per_mj": 0.4314,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.247,
+   "full_race_improvement_s_mean": -14.285
+  },
+  {
+   "key": "Baku_City_Circuit__2022-06-12",
+   "track": "Baku City Circuit",
+   "date": "2022-06-12",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 50,
+   "pace_s_per_mj": 0.4314,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.245,
+   "full_race_improvement_s_mean": -16.465
+  },
+  {
+   "key": "Baku_City_Circuit__2024-09-15",
+   "track": "Baku City Circuit",
+   "date": "2024-09-15",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.4314,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.243,
+   "full_race_improvement_s_mean": -16.551
+  },
+  {
+   "key": "Baku_City_Circuit__2023-04-30",
+   "track": "Baku City Circuit",
+   "date": "2023-04-30",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.4314,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.223,
+   "full_race_improvement_s_mean": -16.223
+  },
+  {
+   "key": "Autodromo_Nazionale_di_Monza__2022-09-11",
+   "track": "Autodromo Nazionale di Monza",
+   "date": "2022-09-11",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.4396,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.166,
+   "full_race_improvement_s_mean": -17.739
+  },
+  {
+   "key": "Baku_City_Circuit__2025-09-21",
+   "track": "Baku City Circuit",
+   "date": "2025-09-21",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 48,
+   "pace_s_per_mj": 0.4314,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.15,
+   "full_race_improvement_s_mean": -15.94
+  },
+  {
+   "key": "Autodromo_Internazionale_Enzo_e_Dino_Ferrari__2021-04-18",
+   "track": "Autodromo Internazionale Enzo e Dino Ferrari",
+   "date": "2021-04-18",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 59,
+   "pace_s_per_mj": 0.4122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.019,
+   "full_race_improvement_s_mean": -16.85
+  },
+  {
+   "key": "Autodromo_Internazionale_Enzo_e_Dino_Ferrari__2022-04-24",
+   "track": "Autodromo Internazionale Enzo e Dino Ferrari",
+   "date": "2022-04-24",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 62,
+   "pace_s_per_mj": 0.4122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.008,
+   "full_race_improvement_s_mean": -20.132
+  },
+  {
+   "key": "Autodromo_Internazionale_Enzo_e_Dino_Ferrari__2024-05-19",
+   "track": "Autodromo Internazionale Enzo e Dino Ferrari",
+   "date": "2024-05-19",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 63,
+   "pace_s_per_mj": 0.4122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -5.008,
+   "full_race_improvement_s_mean": -20.215
+  },
+  {
+   "key": "Autodromo_Internazionale_Enzo_e_Dino_Ferrari__2020-11-01",
+   "track": "Autodromo Internazionale Enzo e Dino Ferrari",
+   "date": "2020-11-01",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 63,
+   "pace_s_per_mj": 0.4122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.998,
+   "full_race_improvement_s_mean": -17.965
+  },
+  {
+   "key": "Circuit_Gilles_Villeneuve__2022-06-19",
+   "track": "Circuit Gilles Villeneuve",
+   "date": "2022-06-19",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.4108,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.994,
+   "full_race_improvement_s_mean": -21.691
+  },
+  {
+   "key": "Circuit_Gilles_Villeneuve__2023-06-18",
+   "track": "Circuit Gilles Villeneuve",
+   "date": "2023-06-18",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.4108,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.992,
+   "full_race_improvement_s_mean": -20.554
+  },
+  {
+   "key": "Le_Castellet__2021-06-20",
+   "track": "Le Castellet",
+   "date": "2021-06-20",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.4099,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.982,
+   "full_race_improvement_s_mean": -16.73
+  },
+  {
+   "key": "Le_Castellet__2022-07-24",
+   "track": "Le Castellet",
+   "date": "2022-07-24",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 52,
+   "pace_s_per_mj": 0.4099,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.939,
+   "full_race_improvement_s_mean": -16.411
+  },
+  {
+   "key": "Red_Bull_Ring__2021-06-27",
+   "track": "Red Bull Ring",
+   "date": "2021-06-27",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.925,
+   "full_race_improvement_s_mean": -18.737
+  },
+  {
+   "key": "Autodromo_Internazionale_Enzo_e_Dino_Ferrari__2025-05-18",
+   "track": "Autodromo Internazionale Enzo e Dino Ferrari",
+   "date": "2025-05-18",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 63,
+   "pace_s_per_mj": 0.4122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.908,
+   "full_race_improvement_s_mean": -19.59
+  },
+  {
+   "key": "Red_Bull_Ring__2022-07-10",
+   "track": "Red Bull Ring",
+   "date": "2022-07-10",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.874,
+   "full_race_improvement_s_mean": -21.603
+  },
+  {
+   "key": "Red_Bull_Ring__2021-07-04",
+   "track": "Red Bull Ring",
+   "date": "2021-07-04",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.861,
+   "full_race_improvement_s_mean": -21.653
+  },
+  {
+   "key": "Circuit_Gilles_Villeneuve__2025-06-15",
+   "track": "Circuit Gilles Villeneuve",
+   "date": "2025-06-15",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.4108,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.845,
+   "full_race_improvement_s_mean": -22.131
+  },
+  {
+   "key": "Albert_Park_Circuit__2026-03-08",
+   "track": "Albert Park Circuit",
+   "date": "2026-03-08",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 58,
+   "pace_s_per_mj": 0.2631,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.831,
+   "full_race_improvement_s_mean": -19.001
+  },
+  {
+   "key": "Circuit_Zandvoort__2026-08-23",
+   "track": "Circuit Zandvoort",
+   "date": "2026-08-23",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS"
+   ],
+   "sessions": 3,
+   "laps": 70,
+   "pace_s_per_mj": 0.2735,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.824,
+   "full_race_improvement_s_mean": -22.418
+  },
+  {
+   "key": "Yas_Island__2020-12-13",
+   "track": "Yas Island",
+   "date": "2020-12-13",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 52,
+   "pace_s_per_mj": 0.3965,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.819,
+   "full_race_improvement_s_mean": -16.023
+  },
+  {
+   "key": "Yas_Island__2022-11-20",
+   "track": "Yas Island",
+   "date": "2022-11-20",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 55,
+   "pace_s_per_mj": 0.3965,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.818,
+   "full_race_improvement_s_mean": -17.629
+  },
+  {
+   "key": "Yas_Island__2023-11-26",
+   "track": "Yas Island",
+   "date": "2023-11-26",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 58,
+   "pace_s_per_mj": 0.3965,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.818,
+   "full_race_improvement_s_mean": -17.806
+  },
+  {
+   "key": "Yas_Island__2024-12-08",
+   "track": "Yas Island",
+   "date": "2024-12-08",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 58,
+   "pace_s_per_mj": 0.3965,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.818,
+   "full_race_improvement_s_mean": -17.846
+  },
+  {
+   "key": "Yas_Island__2025-12-07",
+   "track": "Yas Island",
+   "date": "2025-12-07",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 58,
+   "pace_s_per_mj": 0.3965,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.818,
+   "full_race_improvement_s_mean": -17.663
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2026-06-14",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2026-06-14",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.771,
+   "full_race_improvement_s_mean": -20.139
+  },
+  {
+   "key": "Yas_Island__2021-12-12",
+   "track": "Yas Island",
+   "date": "2021-12-12",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3965,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.763,
+   "full_race_improvement_s_mean": -14.782
+  },
+  {
+   "key": "Las_Vegas_Strip_Circuit__2023-11-18",
+   "track": "Las Vegas Strip Circuit",
+   "date": "2023-11-18",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 46,
+   "pace_s_per_mj": 0.3908,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.752,
+   "full_race_improvement_s_mean": -13.419
+  },
+  {
+   "key": "Las_Vegas_Strip_Circuit__2024-11-23",
+   "track": "Las Vegas Strip Circuit",
+   "date": "2024-11-23",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.3908,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.75,
+   "full_race_improvement_s_mean": -14.777
+  },
+  {
+   "key": "Las_Vegas_Strip_Circuit__2025-11-22",
+   "track": "Las Vegas Strip Circuit",
+   "date": "2025-11-22",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.3908,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.75,
+   "full_race_improvement_s_mean": -14.904
+  },
+  {
+   "key": "Circuit_Gilles_Villeneuve__2024-06-09",
+   "track": "Circuit Gilles Villeneuve",
+   "date": "2024-06-09",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.4108,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.726,
+   "full_race_improvement_s_mean": -19.367
+  },
+  {
+   "key": "Bahrain_International_Circuit__2021-03-28",
+   "track": "Bahrain International Circuit",
+   "date": "2021-03-28",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 55,
+   "pace_s_per_mj": 0.3879,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.716,
+   "full_race_improvement_s_mean": -16.32
+  },
+  {
+   "key": "Bahrain_International_Circuit__2022-03-20",
+   "track": "Bahrain International Circuit",
+   "date": "2022-03-20",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3879,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.714,
+   "full_race_improvement_s_mean": -16.407
+  },
+  {
+   "key": "Bahrain_International_Circuit__2025-04-13",
+   "track": "Bahrain International Circuit",
+   "date": "2025-04-13",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 56,
+   "pace_s_per_mj": 0.3879,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.714,
+   "full_race_improvement_s_mean": -16.749
+  },
+  {
+   "key": "Bahrain_International_Circuit__2024-03-02",
+   "track": "Bahrain International Circuit",
+   "date": "2024-03-02",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3879,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.713,
+   "full_race_improvement_s_mean": -17.036
+  },
+  {
+   "key": "Bahrain_International_Circuit__2023-03-05",
+   "track": "Bahrain International Circuit",
+   "date": "2023-03-05",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3879,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.643,
+   "full_race_improvement_s_mean": -15.451
+  },
+  {
+   "key": "Miami_Gardens__2025-05-04",
+   "track": "Miami Gardens",
+   "date": "2025-05-04",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3771,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.582,
+   "full_race_improvement_s_mean": -16.56
+  },
+  {
+   "key": "Miami_International_Autodrome__2024-05-05",
+   "track": "Miami International Autodrome",
+   "date": "2024-05-05",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3771,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.582,
+   "full_race_improvement_s_mean": -16.372
+  },
+  {
+   "key": "Bahrain_International_Circuit__2020-11-29",
+   "track": "Bahrain International Circuit",
+   "date": "2020-11-29",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 53,
+   "pace_s_per_mj": 0.3879,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.562,
+   "full_race_improvement_s_mean": -15.396
+  },
+  {
+   "key": "Austin__2024-10-20",
+   "track": "Austin",
+   "date": "2024-10-20",
+   "year": "2024",
+   "drivers": [
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 54,
+   "pace_s_per_mj": 0.3748,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.555,
+   "full_race_improvement_s_mean": -15.854
+  },
+  {
+   "key": "Austin__2021-10-24",
+   "track": "Austin",
+   "date": "2021-10-24",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 56,
+   "pace_s_per_mj": 0.3748,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.554,
+   "full_race_improvement_s_mean": -16.284
+  },
+  {
+   "key": "Austin__2023-10-22",
+   "track": "Austin",
+   "date": "2023-10-22",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 56,
+   "pace_s_per_mj": 0.3748,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.554,
+   "full_race_improvement_s_mean": -16.247
+  },
+  {
+   "key": "Austin__2025-10-19",
+   "track": "Austin",
+   "date": "2025-10-19",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 56,
+   "pace_s_per_mj": 0.3748,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.546,
+   "full_race_improvement_s_mean": -16.274
+  },
+  {
+   "key": "Jeddah_Corniche_Circuit__2021-12-05",
+   "track": "Jeddah Corniche Circuit",
+   "date": "2021-12-05",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 43,
+   "pace_s_per_mj": 0.3729,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.536,
+   "full_race_improvement_s_mean": -12.009
+  },
+  {
+   "key": "Jeddah_Corniche_Circuit__2023-03-19",
+   "track": "Jeddah Corniche Circuit",
+   "date": "2023-03-19",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 48,
+   "pace_s_per_mj": 0.3729,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.533,
+   "full_race_improvement_s_mean": -13.875
+  },
+  {
+   "key": "Jeddah_Corniche_Circuit__2025-04-20",
+   "track": "Jeddah Corniche Circuit",
+   "date": "2025-04-20",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 48,
+   "pace_s_per_mj": 0.3729,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.533,
+   "full_race_improvement_s_mean": -13.63
+  },
+  {
+   "key": "Austin__2022-10-23",
+   "track": "Austin",
+   "date": "2022-10-23",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.3748,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.528,
+   "full_race_improvement_s_mean": -14.374
+  },
+  {
+   "key": "Miami_International_Autodrome__2023-05-07",
+   "track": "Miami International Autodrome",
+   "date": "2023-05-07",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.3771,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.527,
+   "full_race_improvement_s_mean": -16.571
+  },
+  {
+   "key": "Miami_International_Autodrome__2022-05-08",
+   "track": "Miami International Autodrome",
+   "date": "2022-05-08",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 55,
+   "pace_s_per_mj": 0.3771,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.517,
+   "full_race_improvement_s_mean": -15.747
+  },
+  {
+   "key": "Suzuka_International_Racing_Course__2025-04-06",
+   "track": "Suzuka International Racing Course",
+   "date": "2025-04-06",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.3711,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.51,
+   "full_race_improvement_s_mean": -15.2
+  },
+  {
+   "key": "Suzuka_International_Racing_Course__2023-09-24",
+   "track": "Suzuka International Racing Course",
+   "date": "2023-09-24",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 50,
+   "pace_s_per_mj": 0.3711,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.494,
+   "full_race_improvement_s_mean": -14.144
+  },
+  {
+   "key": "Suzuka_International_Racing_Course__2024-04-07",
+   "track": "Suzuka International Racing Course",
+   "date": "2024-04-07",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 51,
+   "pace_s_per_mj": 0.3711,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.484,
+   "full_race_improvement_s_mean": -14.559
+  },
+  {
+   "key": "Jeddah_Corniche_Circuit__2022-03-27",
+   "track": "Jeddah Corniche Circuit",
+   "date": "2022-03-27",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 48,
+   "pace_s_per_mj": 0.3729,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.48,
+   "full_race_improvement_s_mean": -13.505
+  },
+  {
+   "key": "Jeddah_Corniche_Circuit__2024-03-09",
+   "track": "Jeddah Corniche Circuit",
+   "date": "2024-03-09",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 48,
+   "pace_s_per_mj": 0.3729,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.478,
+   "full_race_improvement_s_mean": -13.74
+  },
+  {
+   "key": "Red_Bull_Ring__2025-06-29",
+   "track": "Red Bull Ring",
+   "date": "2025-06-29",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS"
+   ],
+   "sessions": 3,
+   "laps": 70,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.463,
+   "full_race_improvement_s_mean": -20.44
+  },
+  {
+   "key": "Nurburgring__2020-10-11",
+   "track": "N\u00fcrburgring",
+   "date": "2020-10-11",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 57,
+   "pace_s_per_mj": 0.3851,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.402,
+   "full_race_improvement_s_mean": -16.748
+  },
+  {
+   "key": "Sao_Paulo__2021-11-14",
+   "track": "S\u00e3o Paulo",
+   "date": "2021-11-14",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.3568,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.335,
+   "full_race_improvement_s_mean": -19.396
+  },
+  {
+   "key": "Sao_Paulo__2023-11-05",
+   "track": "S\u00e3o Paulo",
+   "date": "2023-11-05",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 70,
+   "pace_s_per_mj": 0.3568,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.335,
+   "full_race_improvement_s_mean": -18.085
+  },
+  {
+   "key": "Sao_Paulo__2024-11-03",
+   "track": "S\u00e3o Paulo",
+   "date": "2024-11-03",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 67,
+   "pace_s_per_mj": 0.3568,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.335,
+   "full_race_improvement_s_mean": -18.605
+  },
+  {
+   "key": "Lusail_International_Circuit__2023-10-08",
+   "track": "Lusail International Circuit",
+   "date": "2023-10-08",
+   "year": "2023",
+   "drivers": [
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 56,
+   "pace_s_per_mj": 0.354,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.302,
+   "full_race_improvement_s_mean": -15.503
+  },
+  {
+   "key": "Lusail_International_Circuit__2025-11-30",
+   "track": "Lusail International Circuit",
+   "date": "2025-11-30",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.354,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.302,
+   "full_race_improvement_s_mean": -15.721
+  },
+  {
+   "key": "Sao_Paulo__2022-11-13",
+   "track": "S\u00e3o Paulo",
+   "date": "2022-11-13",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.3568,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.297,
+   "full_race_improvement_s_mean": -19.755
+  },
+  {
+   "key": "Sao_Paulo__2025-11-09",
+   "track": "S\u00e3o Paulo",
+   "date": "2025-11-09",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 37,
+   "pace_s_per_mj": 0.3568,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.289,
+   "full_race_improvement_s_mean": -16.574
+  },
+  {
+   "key": "Lusail_International_Circuit__2024-12-01",
+   "track": "Lusail International Circuit",
+   "date": "2024-12-01",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 55,
+   "pace_s_per_mj": 0.354,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.245,
+   "full_race_improvement_s_mean": -14.863
+  },
+  {
+   "key": "Algarve_International_Circuit__2020-10-25",
+   "track": "Algarve International Circuit",
+   "date": "2020-10-25",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 66,
+   "pace_s_per_mj": 0.3445,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.186,
+   "full_race_improvement_s_mean": -17.722
+  },
+  {
+   "key": "Algarve_International_Circuit__2021-05-02",
+   "track": "Algarve International Circuit",
+   "date": "2021-05-02",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.3445,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.186,
+   "full_race_improvement_s_mean": -17.546
+  },
+  {
+   "key": "Red_Bull_Ring__2020-07-12",
+   "track": "Red Bull Ring",
+   "date": "2020-07-12",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 71,
+   "pace_s_per_mj": 0.4838,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.169,
+   "full_race_improvement_s_mean": -18.395
+  },
+  {
+   "key": "Shanghai_International_Circuit__2024-04-21",
+   "track": "Shanghai International Circuit",
+   "date": "2024-04-21",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 56,
+   "pace_s_per_mj": 0.3366,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.091,
+   "full_race_improvement_s_mean": -14.043
+  },
+  {
+   "key": "Shanghai_International_Circuit__2025-03-23",
+   "track": "Shanghai International Circuit",
+   "date": "2025-03-23",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 56,
+   "pace_s_per_mj": 0.3366,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.09,
+   "full_race_improvement_s_mean": -14.687
+  },
+  {
+   "key": "Lusail_International_Circuit__2021-11-21",
+   "track": "Lusail International Circuit",
+   "date": "2021-11-21",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.354,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -4.088,
+   "full_race_improvement_s_mean": -15.101
+  },
+  {
+   "key": "Silverstone_Circuit__2021-07-18",
+   "track": "Silverstone Circuit",
+   "date": "2021-07-18",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS"
+   ],
+   "sessions": 3,
+   "laps": 49,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.868,
+   "full_race_improvement_s_mean": -11.859
+  },
+  {
+   "key": "Silverstone_Circuit__2022-07-03",
+   "track": "Silverstone Circuit",
+   "date": "2022-07-03",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 48,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.867,
+   "full_race_improvement_s_mean": -11.733
+  },
+  {
+   "key": "Istanbul_Park__2020-11-15",
+   "track": "Istanbul Park",
+   "date": "2020-11-15",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 58,
+   "pace_s_per_mj": 0.3122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "liftcoast",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.846,
+   "full_race_improvement_s_mean": -13.791
+  },
+  {
+   "key": "Silverstone_Circuit__2025-07-06",
+   "track": "Silverstone Circuit",
+   "date": "2025-07-06",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 47,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.837,
+   "full_race_improvement_s_mean": -11.303
+  },
+  {
+   "key": "Silverstone_Circuit__2023-07-09",
+   "track": "Silverstone Circuit",
+   "date": "2023-07-09",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 51,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.83,
+   "full_race_improvement_s_mean": -12.474
+  },
+  {
+   "key": "Silverstone_Circuit__2020-08-09",
+   "track": "Silverstone Circuit",
+   "date": "2020-08-09",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 52,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.819,
+   "full_race_improvement_s_mean": -12.685
+  },
+  {
+   "key": "Hungaroring__2024-07-21",
+   "track": "Hungaroring",
+   "date": "2024-07-21",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.771,
+   "full_race_improvement_s_mean": -16.684
+  },
+  {
+   "key": "Istanbul_Park__2021-10-10",
+   "track": "Istanbul Park",
+   "date": "2021-10-10",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 58,
+   "pace_s_per_mj": 0.3122,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.771,
+   "full_race_improvement_s_mean": -14.049
+  },
+  {
+   "key": "Hungaroring__2021-08-01",
+   "track": "Hungaroring",
+   "date": "2021-08-01",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 68,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.769,
+   "full_race_improvement_s_mean": -16.203
+  },
+  {
+   "key": "Hungaroring__2022-07-31",
+   "track": "Hungaroring",
+   "date": "2022-07-31",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.767,
+   "full_race_improvement_s_mean": -16.591
+  },
+  {
+   "key": "Hungaroring__2025-08-03",
+   "track": "Hungaroring",
+   "date": "2025-08-03",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 69,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.767,
+   "full_race_improvement_s_mean": -16.697
+  },
+  {
+   "key": "Silverstone_Circuit__2024-07-07",
+   "track": "Silverstone Circuit",
+   "date": "2024-07-07",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 52,
+   "pace_s_per_mj": 0.3182,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.764,
+   "full_race_improvement_s_mean": -11.358
+  },
+  {
+   "key": "Hungaroring__2023-07-23",
+   "track": "Hungaroring",
+   "date": "2023-07-23",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.761,
+   "full_race_improvement_s_mean": -16.546
+  },
+  {
+   "key": "Marina_Bay__2023-09-17",
+   "track": "Marina Bay",
+   "date": "2023-09-17",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 61,
+   "pace_s_per_mj": 0.309,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.756,
+   "full_race_improvement_s_mean": -14.392
+  },
+  {
+   "key": "Marina_Bay__2024-09-22",
+   "track": "Marina Bay",
+   "date": "2024-09-22",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 62,
+   "pace_s_per_mj": 0.309,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.755,
+   "full_race_improvement_s_mean": -14.989
+  },
+  {
+   "key": "Marina_Bay__2025-10-05",
+   "track": "Marina Bay",
+   "date": "2025-10-05",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 62,
+   "pace_s_per_mj": 0.309,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.748,
+   "full_race_improvement_s_mean": -14.928
+  },
+  {
+   "key": "Marina_Bay__2022-10-02",
+   "track": "Marina Bay",
+   "date": "2022-10-02",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 51,
+   "pace_s_per_mj": 0.309,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.734,
+   "full_race_improvement_s_mean": -12.332
+  },
+  {
+   "key": "Hungaroring__2020-07-19",
+   "track": "Hungaroring",
+   "date": "2020-07-19",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 70,
+   "pace_s_per_mj": 0.3102,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.675,
+   "full_race_improvement_s_mean": -16.441
+  },
+  {
+   "key": "Circuit_Zandvoort__2025-08-31",
+   "track": "Circuit Zandvoort",
+   "date": "2025-08-31",
+   "year": "2025",
+   "drivers": [
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 52,
+   "pace_s_per_mj": 0.2735,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.324,
+   "full_race_improvement_s_mean": -13.686
+  },
+  {
+   "key": "Circuit_Zandvoort__2024-08-25",
+   "track": "Circuit Zandvoort",
+   "date": "2024-08-25",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 72,
+   "pace_s_per_mj": 0.2735,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.323,
+   "full_race_improvement_s_mean": -15.382
+  },
+  {
+   "key": "Circuit_Zandvoort__2021-09-05",
+   "track": "Circuit Zandvoort",
+   "date": "2021-09-05",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 72,
+   "pace_s_per_mj": 0.2735,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.309,
+   "full_race_improvement_s_mean": -15.132
+  },
+  {
+   "key": "Albert_Park_Circuit__2022-04-10",
+   "track": "Albert Park Circuit",
+   "date": "2022-04-10",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 57,
+   "pace_s_per_mj": 0.2631,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.2,
+   "full_race_improvement_s_mean": -10.397
+  },
+  {
+   "key": "Albert_Park_Circuit__2024-03-24",
+   "track": "Albert Park Circuit",
+   "date": "2024-03-24",
+   "year": "2024",
+   "drivers": [
+    "LEC",
+    "RUS"
+   ],
+   "sessions": 2,
+   "laps": 58,
+   "pace_s_per_mj": 0.2631,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.197,
+   "full_race_improvement_s_mean": -11.697
+  },
+  {
+   "key": "Circuit_Zandvoort__2023-08-27",
+   "track": "Circuit Zandvoort",
+   "date": "2023-08-27",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 70,
+   "pace_s_per_mj": 0.2735,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.17,
+   "full_race_improvement_s_mean": -13.035
+  },
+  {
+   "key": "Albert_Park_Circuit__2023-04-02",
+   "track": "Albert Park Circuit",
+   "date": "2023-04-02",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 53,
+   "pace_s_per_mj": 0.2631,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.135,
+   "full_race_improvement_s_mean": -10.486
+  },
+  {
+   "key": "Autodromo_Internazionale_del_Mugello__2020-09-13",
+   "track": "Autodromo Internazionale del Mugello",
+   "date": "2020-09-13",
+   "year": "2020",
+   "drivers": [
+    "HAM"
+   ],
+   "sessions": 1,
+   "laps": 55,
+   "pace_s_per_mj": 0.26,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.087,
+   "full_race_improvement_s_mean": -10.909
+  },
+  {
+   "key": "Circuit_Zandvoort__2022-09-04",
+   "track": "Circuit Zandvoort",
+   "date": "2022-09-04",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 72,
+   "pace_s_per_mj": 0.2735,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.078,
+   "full_race_improvement_s_mean": -15.021
+  },
+  {
+   "key": "Albert_Park_Circuit__2025-03-16",
+   "track": "Albert Park Circuit",
+   "date": "2025-03-16",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 53,
+   "pace_s_per_mj": 0.2631,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -3.001,
+   "full_race_improvement_s_mean": -10.457
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2022-05-22",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2022-05-22",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.957,
+   "full_race_improvement_s_mean": -10.549
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2020-08-16",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2020-08-16",
+   "year": "2020",
+   "drivers": [
+    "HAM",
+    "VER"
+   ],
+   "sessions": 2,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.946,
+   "full_race_improvement_s_mean": -12.526
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2021-05-09",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2021-05-09",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.946,
+   "full_race_improvement_s_mean": -12.457
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2023-06-04",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2023-06-04",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.946,
+   "full_race_improvement_s_mean": -12.489
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2024-06-23",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2024-06-23",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.946,
+   "full_race_improvement_s_mean": -12.497
+  },
+  {
+   "key": "Circuit_de_Monaco__2026-06-07",
+   "track": "Circuit de Monaco",
+   "date": "2026-06-07",
+   "year": "2026",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS"
+   ],
+   "sessions": 3,
+   "laps": 76,
+   "pace_s_per_mj": 0.1543,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.777,
+   "full_race_improvement_s_mean": -13.465
+  },
+  {
+   "key": "Circuit_de_Barcelona-Catalunya__2025-06-01",
+   "track": "Circuit de Barcelona-Catalunya",
+   "date": "2025-06-01",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 66,
+   "pace_s_per_mj": 0.2425,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.745,
+   "full_race_improvement_s_mean": -12.248
+  },
+  {
+   "key": "Autodromo_Hermanos_Rodriguez__2021-11-07",
+   "track": "Aut\u00f3dromo Hermanos Rodr\u00edguez",
+   "date": "2021-11-07",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.1848,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.245,
+   "full_race_improvement_s_mean": -10.102
+  },
+  {
+   "key": "Autodromo_Hermanos_Rodriguez__2023-10-29",
+   "track": "Aut\u00f3dromo Hermanos Rodr\u00edguez",
+   "date": "2023-10-29",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 68,
+   "pace_s_per_mj": 0.1848,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.245,
+   "full_race_improvement_s_mean": -9.906
+  },
+  {
+   "key": "Autodromo_Hermanos_Rodriguez__2025-10-26",
+   "track": "Aut\u00f3dromo Hermanos Rodr\u00edguez",
+   "date": "2025-10-26",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.1848,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.231,
+   "full_race_improvement_s_mean": -10.178
+  },
+  {
+   "key": "Autodromo_Hermanos_Rodriguez__2024-10-27",
+   "track": "Aut\u00f3dromo Hermanos Rodr\u00edguez",
+   "date": "2024-10-27",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.1848,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.212,
+   "full_race_improvement_s_mean": -10.306
+  },
+  {
+   "key": "Autodromo_Hermanos_Rodriguez__2022-10-30",
+   "track": "Aut\u00f3dromo Hermanos Rodr\u00edguez",
+   "date": "2022-10-30",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 71,
+   "pace_s_per_mj": 0.1848,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -2.187,
+   "full_race_improvement_s_mean": -10.167
+  },
+  {
+   "key": "Circuit_de_Monaco__2021-05-23",
+   "track": "Circuit de Monaco",
+   "date": "2021-05-23",
+   "year": "2021",
+   "drivers": [
+    "HAM",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 3,
+   "laps": 78,
+   "pace_s_per_mj": 0.1543,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -1.875,
+   "full_race_improvement_s_mean": -9.421
+  },
+  {
+   "key": "Monaco__2022-05-29",
+   "track": "Monaco",
+   "date": "2022-05-29",
+   "year": "2022",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 63,
+   "pace_s_per_mj": 0.1543,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -1.875,
+   "full_race_improvement_s_mean": -7.352
+  },
+  {
+   "key": "Monaco__2023-05-28",
+   "track": "Monaco",
+   "date": "2023-05-28",
+   "year": "2023",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 78,
+   "pace_s_per_mj": 0.1543,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -1.875,
+   "full_race_improvement_s_mean": -9.425
+  },
+  {
+   "key": "Monaco__2024-05-26",
+   "track": "Monaco",
+   "date": "2024-05-26",
+   "year": "2024",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 77,
+   "pace_s_per_mj": 0.1543,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -1.875,
+   "full_race_improvement_s_mean": -9.324
+  },
+  {
+   "key": "Monaco__2025-05-25",
+   "track": "Monaco",
+   "date": "2025-05-25",
+   "year": "2025",
+   "drivers": [
+    "HAM",
+    "LEC",
+    "RUS",
+    "VER"
+   ],
+   "sessions": 4,
+   "laps": 78,
+   "pace_s_per_mj": 0.1543,
+   "pace_basis": "measured per-track (ml_models/energy_pace.json)",
+   "strategy_mode": "balanced",
+   "strategy_ok": true,
+   "closing_phase_improvement_s_mean": -1.875,
+   "full_race_improvement_s_mean": -9.395
+  }
+ ],
+ "headline": {
+  "races": 140,
+  "closing_phase_improvement_s_mean": -4.492,
+  "full_race_improvement_s_mean": -16.409,
+  "biggest_gain": [
+   "Red_Bull_Ring__2026-06-28",
+   -12.853
+  ],
+  "deck_anchor": "backtests/monaco_2023_energy.json (closing -1.88s reproduces the deck's -1.8s)"
+ }
+}

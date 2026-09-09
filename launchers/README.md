@@ -6,8 +6,8 @@ and prefers the project virtualenv (`.venv\Scripts\python.exe`), falling
 back to the `python` on your PATH.
 
 > Run them **in numbered order** the first time. Steps 2–4 need your
-> MySQL database to exist and be configured (see the root README:
-> `database/schema.sql` + `scripts/config.py` / `DB_*` environment vars).
+> MySQL database to exist and be configured (see `database/f1_strategy.sql`
+> + `scripts/config.py` / `DB_*` environment vars).
 
 | # | File | What it does | Notes |
 |---|------|--------------|-------|
@@ -28,7 +28,7 @@ back to the `python` on your PATH.
 ## Typical first-time flow
 
 1. `01_setup_dependencies.bat`
-2. Set up MySQL (`database/schema.sql`) and DB credentials (`scripts/config.py`)
+2. Set up MySQL (`database/f1_strategy.sql`) and DB credentials (`scripts/config.py`)
 3. `02_import_race.bat` and/or `03_import_dataset.bat`
 4. `04_audit_pit_events.bat`
 5. `05_train_model.bat`

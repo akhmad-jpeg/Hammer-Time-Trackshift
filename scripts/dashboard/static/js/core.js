@@ -1,7 +1,7 @@
 const TYRE_COLORS = {
-    Hypersoft:'#ff00ff', Ultrasoft:'#9400d3', Supersoft:'#ff4444',
-    Soft:'#ffdd00', Medium:'#dddddd', Hard:'#4fc3f7',
-    Intermediate:'#00c853', Wet:'#0091ea'
+    Hypersoft:'#ff3d81', Ultrasoft:'#d81b60', Supersoft:'#ff4444',
+    Soft:'#ff4444', Medium:'#ffd700', Hard:'#f5f5f5',
+    Intermediate:'#00c853', Wet:'#1e88e5'
 };
 const PIT_COLOR = '#ffa726';
 

@@ -228,6 +228,11 @@
         }
         .chart-card::before { content:''; position:absolute; top:0; left:0; width:40px; height:2px; background:var(--teal); }
         .chart-title { font-weight:700; font-size:0.76em; letter-spacing:3px; text-transform:uppercase; color:var(--text); margin-bottom:16px; }
+        .tyre-legend { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:-6px 0 12px; font-family:'Share Tech Mono',monospace; font-size:0.62em; letter-spacing:1px; color:#999; }
+        .tyre-legend .tl-lbl { color:#667; }
+        .tyre-legend .tl-item { display:inline-flex; align-items:center; gap:5px; color:#ccc; }
+        .tyre-legend .tl-dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+        .tyre-legend .tl-pit { color:#ffa726; }
         .chart-note { margin-top:10px; font-family:'Share Tech Mono',monospace; font-size:0.65em; letter-spacing:1px; color:#777; }
         canvas { width:100%!important; }
         /* The two dashboard charts have no fixed-height container, so they
@@ -726,14 +731,9 @@
         .ht-hero-kicker { font-family:'Share Tech Mono',monospace; font-size:0.62em; letter-spacing:2px; color:var(--red); }
         .ht-hero-title { font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:1.7em; letter-spacing:4px; text-transform:uppercase; color:var(--text); line-height:1.05; margin:2px 0 4px; }
         .ht-hero-line { font-family:'Share Tech Mono',monospace; font-size:0.72em; letter-spacing:1px; color:var(--muted); }
-        .ht-state-grid { display:grid; grid-template-columns:1.2fr 1fr 1.2fr; gap:18px; margin:16px 0 4px; }
+        .ht-state-grid { display:grid; grid-template-columns:1fr; gap:18px; margin:16px 0 4px; }
         .ht-state-grp { min-width:0; }
         .ht-inherit { font-family:'Share Tech Mono',monospace; font-size:0.66em; letter-spacing:1px; color:#9ab; background:rgba(255,255,255,0.02); border:1px dashed var(--border); border-radius:4px; padding:6px 10px; margin-bottom:12px; }
-        .ht-actions { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:4px 0 16px; }
-        .ht-action { display:flex; flex-direction:column; gap:3px; align-items:flex-start; text-align:left; background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:14px 18px; cursor:pointer; transition:border-color .12s, transform .12s; }
-        .ht-action:hover { border-color:var(--gold); transform:translateY(-1px); }
-        .ht-action .ha-t { font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:0.95em; letter-spacing:3px; color:var(--text); }
-        .ht-action .ha-s { font-family:'Share Tech Mono',monospace; font-size:0.6em; letter-spacing:1px; color:var(--muted); }
         .hero-call { background:linear-gradient(135deg, rgba(255,215,0,0.06), rgba(255,255,255,0.01) 55%); border:1px solid rgba(255,215,0,0.25); border-left:4px solid var(--gold); border-radius:8px; padding:18px 22px; margin-top:14px; }
         body.light-mode .hero-call { background:linear-gradient(135deg, rgba(255,215,0,0.10), rgba(0,0,0,0.01) 55%); }
         .hc-mode { font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:2em; letter-spacing:5px; text-transform:uppercase; line-height:1; }
@@ -770,7 +770,7 @@
         .export-menu-list button:disabled { opacity:0.4; cursor:not-allowed; }
         .pit-chip { color:#00d2be; border:1px solid rgba(0,210,190,0.45); border-radius:3px; padding:0 5px; font-size:0.9em; white-space:nowrap; }
         .sc-chip { color:#4fc3f7; border:1px solid rgba(79,195,247,0.45); border-radius:3px; padding:0 5px; font-size:0.9em; white-space:nowrap; }
-        @media(max-width:1180px) { .ht-labgrid, .ht-gaprow { grid-template-columns:1fr; } .ht-state-grid, .ht-actions { grid-template-columns:1fr; } }
+        @media(max-width:1180px) { .ht-labgrid, .ht-gaprow { grid-template-columns:1fr; } }
         @media(max-width:900px) {
             .ht-head { padding:11px 14px; gap:10px; }
             .ht-title { font-size:0.82em; }

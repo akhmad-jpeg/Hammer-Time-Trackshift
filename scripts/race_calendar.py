@@ -12,7 +12,7 @@ Round fields:
   round   — calendar round number
   country — display name (duplicate venues keep their GP name, e.g. the
             Styria/Austria double header at the Red Bull Ring)
-  code    — flag PNG name under scripts/static/flags/
+  code    — flag PNG name under scripts/dashboard/static/flags/
   dates   — weekend dates for display
   track   — |-separated substrings matched against the DB's track_name,
             so a round highlights when a session's track matches it
