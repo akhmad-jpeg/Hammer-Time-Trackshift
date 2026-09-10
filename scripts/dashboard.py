@@ -24,6 +24,7 @@ from feature_pipeline import (
 )
 import driver_comparison
 import overtake_inference  # import-safe; models load lazily below
+import policy_engine        # import-safe; multi-policy decision engine
 import race_calendar  # official calendars 2020-2026 (single source of truth)
 
 # Battery capacity/floor used to express the synthetic ERS trace as a
@@ -44,6 +45,7 @@ from energy_simulator import (
     LIMITED_LAP_PACE_EFFECTIVENESS,
     project_energy_trace,
     intra_lap_battery_curve,
+    battery_uncertainty_band,
     resolve_track_profile,
     normalize_track_name,
     _speed_drop_regen as regen_from_speed_samples,
@@ -377,6 +379,12 @@ def _energy_trace_points(cursor, session_id):
             lap['samples'], lap['start'], lap['deployed'],
             lap['harvested'], lap['end'],
             lap_time_s=lap['lap_time_s'])
+        # SOC uncertainty band for this lap: the battery is a SYNTHESIZED
+        # estimate, so every chart point carries ± band (floor at the
+        # simulator write, growing with laps since it — see
+        # energy_simulator.battery_uncertainty_band).  The renderer draws
+        # this as a shaded envelope around the tracking line.
+        band = battery_uncertainty_band(lap_no - 1)["band_pct"]
         for p in curve:
             soc = max(0.0, min(capacity, float(p['soc_mj'])))
             trace.append({
@@ -385,6 +393,7 @@ def _energy_trace_points(cursor, session_id):
                 "x": round(lap_no + float(p['fraction']), 4),
                 "battery_mj": round(soc, 4),
                 "battery_pct": round(soc / capacity * 100.0, 2),
+                "band_pct": band,
             })
     return trace
 
@@ -1105,6 +1114,42 @@ def _driver_inventory(session_id, driver_id, conn):
 # letting the penalty grow unbounded would make "nurse a clapped set home"
 # absurdly expensive instead of merely very expensive.
 MAX_WEAR_PENALTY = 1.8
+
+
+def _sandbox_realloc(budget, base_deploy, deltas):
+    """Per-sector slider reallocation for the Energy Sandbox.
+
+    Slider asks are clamped at zero and the lap's deploy budget is
+    redistributed across the surviving requests (zero-sum after
+    normalisation — the sandbox reshapes the lap, it never raises it).
+
+    Returns (deploy_shifted, eff_delta, degraded_reason).  ``degraded_reason``
+    is None unless the lap has NO budget to reallocate at all: an
+    energy-limited lap (the mode could not fund its own plan from the store)
+    leaves base_deploy ~all-zero, so all-negative slider asks clamp to zero
+    everywhere and the normalisation would divide by zero.  There is nothing
+    to reallocate — the sliders have no effect this lap — so the caller gets
+    an explicit degraded state to report instead of a ZeroDivisionError
+    (the route's original failure mode).
+    """
+    req = [max(0.0, base_deploy[k] + deltas[k]) for k in range(3)]
+    tot_req = sum(req)
+    if tot_req > 1e-9:
+        deploy_shifted = [budget * req[k] / tot_req for k in range(3)]
+        eff_delta = [deploy_shifted[k] - base_deploy[k] for k in range(3)]
+        return deploy_shifted, eff_delta, None
+    if budget > 1e-9:
+        # Sliders asked for less than nothing everywhere: fall back to the
+        # baseline split (even thirds of the mode's real budget).
+        even = budget / 3.0
+        deploy_shifted = [even] * 3
+        eff_delta = [even - base_deploy[k] for k in range(3)]
+        return deploy_shifted, eff_delta, None
+    return ([0.0] * 3,
+            [-base_deploy[k] for k in range(3)],
+            "Lap deploy budget is ~0 MJ (energy-limited lap: the store cannot "
+            "fund this mode's plan), so there is no budget to reallocate — "
+            "per-sector sliders have no effect this lap.")
 
 
 def _measured_slope(tyre, track=None):
@@ -1908,6 +1953,78 @@ def analyze_energy_modes():
             except: pass
 
 
+# MULTI-POLICY TACTICAL DECISION ENGINE (the ACTION card)
+#
+# The challenge's core deliverable: instead of a passive projection plus a
+# threshold verdict, evaluate FIVE competing tactical policies (greedy
+# attack / balanced hold / tactical stalk / save & defend / undercut prep)
+# against the same race state and return a ranked, constrained
+# recommendation — the ACTION card — with per-policy score components so the
+# UI can show WHY each loser lost.  All mechanics live in
+# scripts/policy_engine.py; this route only parses/validates the state.
+
+@app.route('/api/strategy/policies', methods=['POST'])
+def strategy_policies():
+    try:
+        body = request.get_json() or {}
+        leader = str(body.get('leader_code') or '').strip().upper()
+        chaser = str(body.get('chaser_code') or '').strip().upper()
+        track = str(body.get('track_name') or '').strip()
+        if not leader or not chaser or not track:
+            return jsonify({"error": "leader_code, chaser_code and "
+                                      "track_name required"}), 400
+        if leader == chaser:
+            return jsonify({"error": "Pick two different drivers."}), 400
+        year_raw = body.get('year')
+        year = int(year_raw) if year_raw not in (None, "") else None
+        batt_raw = body.get('chaser_battery_pct')
+        batt = (float(batt_raw) if batt_raw not in (None, "") else None)
+        reserve_raw = body.get('reserve_target_mj')
+        reserve = (float(reserve_raw) if reserve_raw not in (None, "") else None)
+        posture = str(body.get('leader_posture') or 'balanced').strip().lower()
+        perspective = str(body.get('perspective') or 'chaser').strip().lower()
+        if perspective not in ('chaser', 'leader'):
+            return jsonify({"error": "perspective must be 'chaser' or "
+                                      "'leader'"}), 400
+
+        common = dict(
+            leader_code=leader, chaser_code=chaser, track_name=track,
+            start_lap=int(body.get('start_lap') or 1),
+            race_length=int(body.get('race_length') or 57),
+            gap_before_s=float(body.get('gap_before_s') or 0.8),
+            leader_tyre_compound=body.get('leader_tyre_compound') or 'Medium',
+            chaser_tyre_compound=body.get('chaser_tyre_compound') or 'Medium',
+            leader_tyre_age=float(body.get('leader_tyre_age') or 0.0),
+            chaser_tyre_age=float(body.get('chaser_tyre_age') or 0.0),
+            year=year,
+            reserve_target_mj=reserve,
+        )
+        if perspective == 'leader':
+            # From the leader's seat the battery override is OUR car
+            # (the defender); the threat's battery is the other input.
+            result = policy_engine.evaluate_leader_policies(
+                **common,
+                leader_battery_pct=batt,
+                chaser_battery_pct=(float(body['threat_battery_pct'])
+                                    if body.get('threat_battery_pct') not in
+                                    (None, "") else None),
+            )
+        else:
+            result = policy_engine.evaluate_tactical_policies(
+                **common,
+                chaser_battery_pct=batt,
+                leader_posture=posture,
+            )
+        resp = jsonify(result)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 # ENERGY SANDBOX API (PPT module 02)
 #
 # Per-sector deployment reallocation inside a fixed per-lap budget: three
@@ -2072,7 +2189,7 @@ def energy_sandbox():
         base_harvest = [harvest_total * h_w[k] for k in range(3)]
 
         # Sliders: per-sector deploy deltas, reallocated within the lap
-        # budget (zero-sum after normalisation -- negative requests are
+        # budget (zero-sum after normalisation — negative requests are
         # clamped away and the remainder is redistributed by weight).
         delta = [0.0, 0.0, 0.0]
         raw_sum = 0.0
@@ -2080,12 +2197,8 @@ def energy_sandbox():
             d = float(deltas_raw.get(f's{k + 1}', 0.0) or 0.0)
             delta[k] = d
             raw_sum += d
-        req = [max(0.0, base_deploy[k] + delta[k]) for k in range(3)]
-        tot_req = sum(req)
-        if tot_req <= 1e-9:
-            req = [budget / 3.0] * 3
-        deploy_shifted = [budget * req[k] / tot_req for k in range(3)]
-        eff_delta = [deploy_shifted[k] - base_deploy[k] for k in range(3)]
+        deploy_shifted, eff_delta, sandbox_degraded = _sandbox_realloc(
+            budget, base_deploy, delta)
 
         def _sim_sectors(deploy_list, harvest_list):
             # Per-sector guardrails (deploy first, then harvest within the
@@ -2209,11 +2322,16 @@ def energy_sandbox():
                 "end_soc_pct": round(res_end / capacity * 100.0, 2),
                 "min_soc_pct": round(res_min / capacity * 100.0, 2),
                 "unspent_mj": round(max(0.0, budget - res_d), 4),
+                "status": ("degraded" if sandbox_degraded else "ok"),
+                "degraded_reason": sandbox_degraded,
                 "effective_deltas_mj": {"s1": round(eff_delta[0], 3),
                                         "s2": round(eff_delta[1], 3),
                                         "s3": round(eff_delta[2], 3)},
                 "sectors": res_rows,
-                "warnings": _warn_json(lap_warns + res_warns),
+                "warnings": _warn_json(
+                    (lap_warns + res_warns)
+                    + ([("warn", "no_budget_to_reallocate", sandbox_degraded)]
+                       if sandbox_degraded else [])),
             },
             "elapsed_ms": round((time.perf_counter() - t0) * 1000.0, 1),
         })

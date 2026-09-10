@@ -797,6 +797,9 @@ function livePct(p) { return Math.round(100 * Math.min(1, Math.max(0, p || 0)));
 // Pick THE CALL from the compared settings: the lightest ERS setting that
 // still projects a clean pass; else best window; else conserve-to-the-flag.
 // Net-zero shapes (Balanced, or a store-neutral reallocation) anchor first.
+// A 'hold' verdict (the battery/posture gate) is treated as a non-conversion:
+// the walk reached the target but only by draining the store to its floor or
+// while the strategist asked to conserve, so it must not win the ranking.
 function chooseCall(scenarios) {
     const byVerdict = (v) => scenarios.filter(x => x.live.call.verdict === v);
     const passers = byVerdict('attack').sort((a, b) => {
@@ -809,6 +812,10 @@ function chooseCall(scenarios) {
         (a, b) => (b.live.summary.best_lap_probability || 0)
                 - (a.live.summary.best_lap_probability || 0));
     if (attempts.length) return { kind: 'attempt', run: attempts[0], attempts };
+    const holds = byVerdict('hold').sort(
+        (a, b) => (b.live.summary.best_lap_probability || 0)
+                - (a.live.summary.best_lap_probability || 0));
+    if (holds.length) return { kind: 'hold', run: holds[0], holds };
     const balanced = scenarios.find(s => scenIsBalanced(s.scenario)) || scenarios[0];
     return { kind: 'none', run: balanced };
 }
@@ -846,6 +853,8 @@ function renderLiveCompare(scenarios) {
         let resTxt;
         if (cc.verdict === 'attack') {
             resTxt = `<b style="color:#ff6b6b">PASS L${cc.pass_lap}</b>`;
+        } else if (cc.verdict === 'hold') {
+            resTxt = `<span style="color:#ffb300">HOLD${cc.pass_lap ? ` — PASS L${cc.pass_lap} DRAINS STORE` : ' — SAVE'}</span>`;
         } else if (cc.verdict === 'attempt') {
             resTxt = `window ~L${cc.window_open_lap || '—'} · no pass`;
         } else {
@@ -974,11 +983,15 @@ function renderLiveCompare(scenarios) {
     // HERO — the call itself: mode, one-line outcome, four numbers, risk.
     const heroTag = picked.kind === 'pass'
         ? `▲ Clean overtake projected — Lap ${c.pass_lap}.`
+        : picked.kind === 'hold'
+        ? (c.verdict_reason
+            ? `HOLD — ${c.verdict_reason}.`
+            : `HOLD — the window converts but this posture drains the store to its floor; attack from a posture that keeps a reserve.`)
         : picked.kind === 'attempt'
         ? `No clean overtake — attack window opens ~L${c.window_open_lap || '—'}. Only spend energy if the position is worth the risk.`
         : 'No clean overtake predicted — protect the battery and attack later.';
-    const heroRisk = (s.ers_energy_limited_laps || picked.kind === 'attempt')
-        ? { t: s.ers_energy_limited_laps ? '⚠ BATTERY RISK' : 'HIGH RISK', c: '#ff6b6b' }
+    const heroRisk = (s.ers_energy_limited_laps || picked.kind === 'attempt' || picked.kind === 'hold')
+        ? { t: s.ers_energy_limited_laps ? '⚠ BATTERY RISK' : (picked.kind === 'hold' ? '● HOLD — BATTERY GATE' : 'HIGH RISK'), c: '#ffb300' }
         : (scenNet(sc) > 1e-9 ? { t: 'MEDIUM RISK', c: '#ffd700' } : { t: '● LOW RISK', c: '#00c853' });
     const hstat = (label, val, col) =>
         `<div class="hc-stat"><span class="hcs-l">${label}</span><span class="hcs-v"${col ? ` style="color:${col}"` : ''}>${val}</span></div>`;

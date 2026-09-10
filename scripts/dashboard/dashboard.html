@@ -31,6 +31,7 @@
         <button class="f1-nav-btn" onclick="switchTab('predict',this)">Lap Predictor</button>
         <button class="f1-nav-btn" onclick="switchTab('strategy',this)">Strategy Advisor</button>
         <button class="f1-nav-btn" onclick="switchTab('whatif',this)">Hammer Time</button>
+        <button class="f1-nav-btn" onclick="switchTab('policies',this)">Tactical Options</button>
         <button class="f1-nav-btn" onclick="switchTab('drivers',this)">Drivers</button>
     </nav>
 
@@ -135,7 +136,7 @@
                 </div>
                 <div id="energyNoData" class="no-data">SELECT A SESSION</div>
                 <canvas id="energyChart" style="display:none"></canvas>
-                <div class="chart-note" id="energyChartNote" style="display:none">Synthetic battery-% tracking line — reconstructed within each lap from the telemetry samples: it drops as energy is deployed (full throttle) and rises as it is harvested (braking / lift-off). The battery starts the race FULL (100% = the 4 MJ usable Energy Store, so 1% = 0.04 MJ) and the opening laps burn it down into the working band — a full store cannot accept regeneration. The dashed 30% / 80% guides are a soft band, not a barrier: steady laps mostly cycle between them, but faster-than-average laps spend stored energy and can dip below 30%, while slower / management laps bank energy and can climb above 80%. Deploy / recover flow is modelled at up to 120 kW = 0.12 MJ/s. Per-lap totals from scripts/energy_simulator.py.</div>
+                <div class="chart-note" id="energyChartNote" style="display:none">Synthetic battery-% tracking line — reconstructed within each lap from the telemetry samples: it drops as energy is deployed (full throttle) and rises as it is harvested (braking / lift-off). The battery starts the race FULL (100% = the 4 MJ usable Energy Store, so 1% = 0.04 MJ) and the opening laps burn it down into the working band — a full store cannot accept regeneration. The dashed 30% / 80% guides are a soft band, not a barrier: steady laps mostly cycle between them, but faster-than-average laps spend stored energy and can dip below 30%, while slower / management laps bank energy and can climb above 80%. Deploy / recover flow is modelled at up to 120 kW = 0.12 MJ/s. Per-lap totals from scripts/energy_simulator.py. <b style="color:#ff9f43">The shaded envelope around the line is the SOC uncertainty band</b> — the battery is not broadcast by F1, it is a synthesized estimate (±2% at the simulator's last write, growing ±0.5%/lap, capped ±8%), so the estimate admits its own error instead of showing fake point precision.</div>
             </div>
             <div class="chart-card">
                 <div class="chart-title">Lap Time Progression</div>
@@ -723,6 +724,81 @@
     </div>
 </div>
 
+<!-- TAB: TACTICAL OPTIONS — the multi-policy decision engine (ACTION card) -->
+<div id="tab-policies" class="tab-panel">
+    <!-- CONTEXT BAR — inherits the Hammer Time scenario (single source of truth) -->
+    <div class="ctx-bar" id="po-ctxbar">
+        <div class="ctx-main">
+            <span class="ctx-battle" id="po-battle">— → —</span>
+            <span class="ctx-meta" id="po-meta">INHERITS THE HAMMER TIME SCENARIO</span>
+        </div>
+        <div class="ctx-chips">
+            <span class="ctx-chip" id="po-gap">GAP —</span>
+            <span class="ctx-chip" id="po-batt">BATT AUTO (~62%)</span>
+            <span class="ctx-chip" id="po-posture-chip">LEADER: PASSIVE</span>
+        </div>
+        <div class="ctx-actions">
+            <button type="button" class="ctx-edit" onclick="switchTabTo('whatif')">EDIT SCENARIO</button>
+        </div>
+    </div>
+
+    <!-- HERO · THE ACTION CARD -->
+    <div class="ht-mod open" id="po-action">
+        <div class="ht-hero">
+            <div class="ht-hero-kicker">DECISION ENGINE</div>
+            <div class="ht-hero-title">WHICH TACTICAL CALL?</div>
+            <div class="ht-hero-line" id="po-hero-line">Pick a seat — attacking chaser or defending leader — then let five competing policies fight it out over the same race state.</div>
+        </div>
+        <div class="ht-body" style="border-top:0;padding-top:0">
+            <div class="field" style="margin:14px 0 0">
+                <label>Perspective — which seat are we advising?</label>
+                <div class="po-posture" id="po-persp">
+                    <button type="button" class="po-persp-btn active" data-perspective="chaser" onclick="poSetPerspective(this)">CHASER — WE ATTACK</button>
+                    <button type="button" class="po-persp-btn" data-perspective="leader" onclick="poSetPerspective(this)">LEADER — WE DEFEND</button>
+                </div>
+            </div>
+            <div class="two-col ht-cols" style="gap:12px;margin-top:14px">
+                <div class="field" style="margin:0">
+                    <label id="po-batt-label">Chaser battery now (% — blank = ~62% band)</label>
+                    <input type="number" id="po-batt-in" min="0" max="100" step="1" placeholder="blank = auto">
+                </div>
+                <div class="field" style="margin:0">
+                    <label>Reserve target (% of store — policies below it are rejected)</label>
+                    <input type="number" id="po-reserve" min="10" max="100" step="5" value="40">
+                </div>
+            </div>
+            <div id="po-leader-extras" style="display:none">
+                <div class="two-col ht-cols" style="gap:12px;margin-top:12px">
+                    <div class="field" style="margin:0">
+                        <label>Threat: attacking chaser's battery (% — blank = ~62%)</label>
+                        <input type="number" id="po-threat-batt" min="0" max="100" step="1" placeholder="blank = ~62%">
+                    </div>
+                    <div class="field" style="margin:0">
+                        <label>Threat model (disclosed): chaser attacks at a fixed 75% lever</label>
+                        <div class="chart-note" style="margin:0;padding:8px 10px">From this seat the engine scores DEFENCES: how long does the position hold, and what does holding it cost?</div>
+                    </div>
+                </div>
+            </div>
+            <div id="po-chaser-extras" style="margin-top:10px">
+                <div class="field" style="margin:10px 0 0">
+                    <label>Leader posture — the game-theoretic lever (does the leader fight back?)</label>
+                    <div class="po-posture" id="po-posture">
+                        <button type="button" class="po-posture-btn active" data-posture="balanced" onclick="poSetPosture(this)">PASSIVE</button>
+                        <button type="button" class="po-posture-btn" data-posture="defensive_boost" onclick="poSetPosture(this)">DEFENSIVE BOOST</button>
+                    </div>
+                </div>
+            </div>
+            <button class="action-btn" id="po-run-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px;margin-top:6px" onclick="runPolicyEngine()">⚡ EVALUATE FIVE POLICIES</button>
+            <div class="err-box" id="po-err" style="display:none"></div>
+            <div id="po-out"><div class="chart-note">The engine rolls GREEDY ATTACK / BALANCED HOLD / TACTICAL STALK / SAVE &amp; DEFEND / UNDERCUT PREP through the same simulator as the live race call, scores them with a transparent cost function, and rejects any policy that breaches the battery reserve. The winner becomes the ACTION card; the losers stay visible with the reason each one lost.</div></div>
+            <details class="ht-hint" style="margin-top:14px">
+                <summary>ⓘ How the engine decides</summary>
+                <p>Pick a seat. <b>CHASER</b>: each policy is an attack plan rolled through the race-call simulator; score = P(pass) × 6.0&nbsp;s − 2.0&nbsp;s/MJ below reserve − tyre wear − P(fail) × 4.0&nbsp;s − 0.1&nbsp;s/lap deferral. <b>LEADER</b>: the chaser is modelled as attacking at a fixed 75% lever, and each policy is a defence; score = position risk (6.0&nbsp;s if the attack lands, residual threat otherwise) + battery + wear − <b>0.2&nbsp;s per lap the defence holds</b>. Any policy — attack or defence — whose store dips below the reserve target or drains to the 30% floor is <b>INFEASIBLE</b>: pruned, never recommended, shown greyed-out with its reason. Confidence scales with the score margin over the runner-up, degraded by the battery uncertainty band. Deterministic: the same state always yields the same call.</p>
+            </details>
+        </div>
+    </div>
+</div>
+
 <!-- TAB: DRIVER COMPARISON -->
 <div id="tab-drivers" class="tab-panel">
     <div class="two-col">
@@ -812,5 +888,6 @@
 <script src="/static/js/dashboard.js"></script>
 <script src="/static/js/drivers.js"></script>
 <script src="/static/js/whatif.js"></script>
+<script src="/static/js/policies.js"></script>
 </body>
 </html>

@@ -159,7 +159,12 @@ function paintEnergyChart(rows, modeLabel) {
                         tooltip: {
                             callbacks: {
                                 title: () => '',
-                                label: ctx => 'LAP ' + Math.floor(ctx.parsed.x) + ' · battery ' + ctx.parsed.y.toFixed(1) + '%'
+                                label: ctx => {
+                                    if (ctx.dataset.label && ctx.dataset.label.startsWith('uncertainty')) return null;
+                                    const r = rows[ctx.dataIndex];
+                                    const b = r && r.band_pct != null ? ' ±' + r.band_pct.toFixed(1) + '%' : '';
+                                    return 'LAP ' + Math.floor(ctx.parsed.x) + ' · battery ' + ctx.parsed.y.toFixed(1) + '%' + b + ' (synthetic)';
+                                }
                             }
                         }
                     },
@@ -185,12 +190,36 @@ function paintEnergyChart(rows, modeLabel) {
         const xs = rows.map(r => r.x);
         const xMin = Math.max(0.5, Math.min(...xs) - 0.5);
         const xMax = Math.max(...xs) + 0.5;
+        // SOC uncertainty envelope: the battery is a SYNTHESIZED estimate,
+        // so each point carries a ± band (floor ±2% at the simulator write,
+        // +0.5%/lap of drift, capped ±8% — energy_simulator.
+        // battery_uncertainty_band).  Drawn as two shaded boundaries around
+        // the tracking line: the estimate is honest about what it does not
+        // know, growing dimmer as it drifts from the last anchor.
+        const hasBand = rows.some(r => r.band_pct != null);
+        const envelope = hasBand ? [
+            {
+                label: 'uncertainty +band',
+                data: rows.map(r => ({ x: r.x, y: Math.min(100, r.battery_pct + (r.band_pct || 0)) })),
+                borderColor: 'rgba(255,215,0,0.18)', backgroundColor: 'rgba(255,215,0,0.05)',
+                borderWidth: 1, pointRadius: 0, tension: 0.15,
+                fill: '-1', spanGaps: true
+            },
+            {
+                label: 'uncertainty −band',
+                data: rows.map(r => ({ x: r.x, y: Math.max(0, r.battery_pct - (r.band_pct || 0)) })),
+                borderColor: 'rgba(255,215,0,0.18)', backgroundColor: 'rgba(255,215,0,0.10)',
+                borderWidth: 1, pointRadius: 0, tension: 0.15,
+                fill: false, spanGaps: true
+            }
+        ] : [];
         energyChart.data.datasets = [
+            ...envelope,
             {
                 label: (modeLabel ? modeLabel + ' · Battery %' : 'Battery %'),
                 data: rows.map(r => ({ x: r.x, y: r.battery_pct })),
                 borderColor: '#ffd700', backgroundColor: 'rgba(255,215,0,0.08)',
-                borderWidth: 1.5, pointRadius: 0, tension: 0.15, fill: true
+                borderWidth: 1.5, pointRadius: 0, tension: 0.15, fill: hasBand ? false : true
             },
             {
                 label: 'soft band floor 30% (1.2 MJ)',

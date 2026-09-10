@@ -1848,6 +1848,22 @@ def predict_overtake(gap_before_s, pace_gap_s,
 # ---------------------------------------------------------------------------
 LIVE_WINDOW_S = 1.2            # within this gap the P0 signal is meaningful
 LIVE_PASS_CUM = 0.8            # cumulative P(overtake) treated as the pass
+
+# Battery-gate for the ATTACK verdict (Phase 2 audit P0 fix).  A projection
+# that only reaches the pass by running the store INTO its 30% floor is not
+# a clean attack: the pace edge fades exactly when the pass is needed (the
+# lap is energy-limited), so the honest call is HOLD — try the pass, but
+# from a posture that does not have to drain the store to get there.
+# Comparison ops use a small epsilon so a store that merely TOUCHES the
+# floor on the pass lap still counts as drained (frac<1 fired that lap).
+LIVE_ATTACK_MIN_SOC_PCT = 30.0
+LIVE_SOC_EPS_PCT = 0.05
+
+# LEADER COUNTER-DEFENSE (game-theoretic asymmetry) — see the LIVE_* block
+# near the live-call code for the full rationale.  'defensive_boost' gives
+# the leader the same lever physics as the chaser (own 4 MJ store, same
+# s/MJ, same 30% floor).
+LIVE_LEADER_DEFENSE_POSTURES = ("balanced", "defensive_boost")
                                #   Raised from 0.5 after the race-call backtest
                                #   (scripts/backtest_race_calls.py): 0.5 fires an
                                #   instant attack whenever a single-lap P exceeds
@@ -1869,6 +1885,16 @@ LIVE_MAX_SINGLE_STINT = 42     # beyond this tyre age the walk is extrapolating
 # banking is converted to lap time with the track's seconds-per-MJ scaling
 # from ml_models/energy_pace.json (anchor 0.35 s/MJ x full-throttle share).
 ERS_MAX_MJ_LAP = 0.12          # full slider deflection = this much MJ/lap
+
+# Defensive deployment spend per lap in 'defensive_boost' (MJ/lap).  Same
+# physics as the chaser's lever — own 4 MJ store, own 30% floor, same
+# measured s/MJ — but sized to actually COUNTER an attack: a defending car
+# reacts to the attack it sees, so it matches and slightly exceeds the
+# attacker's typical net spend (2x one full slider = ~0.24 MJ/lap, about
+# what a max chaser push actually drains).  A defensive leader is faster
+# by delivered MJ x s/MJ on every funded lap, then reverts to Balanced
+# once its store hits the 30% floor — no free energy on either side.
+LIVE_DEFENSE_NET_MJ = 2.0 * ERS_MAX_MJ_LAP
 ERS_STORE_MJ = 4.0             # usable Energy Store capacity
 ERS_FLOOR_MJ = 1.2             # 30% of the store (below: cannot sustain)
 ERS_DEFAULT_START_PCT = 62.5   # mid-race SOC default (deck's working band)
@@ -1935,6 +1961,9 @@ def simulate_live_call(leader_code, chaser_code, track_name,
                        year=None, window_s=None, pass_cum=None,
                        chaser_ers=None, chaser_ers_deltas=None,
                        chaser_battery_pct=None,
+                       leader_posture="balanced",
+                       leader_ers=None, leader_ers_deltas=None,
+                       leader_battery_pct=None,
                        models_dir=None):
     """Live forward-projection race call (no stored sessions required).
 
@@ -1960,6 +1989,18 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     store hits its 30% floor the car reverts to Balanced pace and the lap is
     counted as energy-limited.  ERS is treated neutral when omitted.
 
+    The LEADER carries the mirrored lever set: ``leader_ers`` /
+    ``leader_ers_deltas`` / ``leader_battery_pct`` work exactly like the
+    chaser's (same store, same floor, same measured s/MJ — deployment makes
+    the leader faster and shrinks the closing, banking gives the chaser a
+    free close but preserves the store).  ``leader_posture='defensive_boost'
+    `` (no explicit leader lever passed) is a preset: the leader counter-
+    deploys LIVE_DEFENSE_NET_MJ per lap, reacting to the attack it sees.
+    The classifier's energy feature keeps its training semantics (chaser
+    deployment advantage vs a Balanced mid-race leader) for BOTH sides:
+    each side's lever acts through the pace feature only, so one physical
+    action can never enter the model twice through two features.
+
     Returns:
       meta       — drivers, track, season, start/end lap, gap and the tyre
                    state the projection starts from, the ERS posture applied
@@ -1982,6 +2023,10 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     chaser_code = str(chaser_code).strip().upper()
     if leader_code == chaser_code:
         raise ValueError("Pick two different drivers.")
+    leader_posture = str(leader_posture or "balanced").strip().lower()
+    if leader_posture not in LIVE_LEADER_DEFENSE_POSTURES:
+        raise ValueError("leader_posture must be one of "
+                         f"{LIVE_LEADER_DEFENSE_POSTURES}")
     track_name = str(track_name).strip()
     start_lap = int(start_lap)
     race_length = int(race_length)
@@ -2058,6 +2103,54 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     ers_banked_mj = 0.0
     energy_limited_laps = 0
 
+    # ---- LEADER lever (mirror of the chaser's block, same physics).
+    l_ers_deltas = None
+    if leader_ers_deltas is not None:
+        try:
+            d = [float(x) for x in list(leader_ers_deltas)]
+        except (TypeError, ValueError):
+            raise ValueError(
+                "leader_ers_deltas must be 3 numbers (MJ per sector)")
+        if len(d) != 3:
+            raise ValueError(
+                "leader_ers_deltas must be 3 numbers (MJ per sector)")
+        l_ers_deltas = [max(-8.5, min(8.5, x)) for x in d]
+    elif leader_ers not in (None, "", 0, "0"):
+        try:
+            e = max(-100.0, min(100.0, float(leader_ers)))
+        except (TypeError, ValueError):
+            raise ValueError("leader_ers must be a number between -100 and 100")
+        if abs(e) >= 0.5:
+            spread = (e / 100.0) * ERS_MAX_MJ_LAP
+            l_ers_deltas = [spread, spread, spread]
+    if l_ers_deltas is not None and all(abs(x) < 1e-9 for x in l_ers_deltas):
+        l_ers_deltas = None
+    # Explicit leader lever wins; leader_posture is the no-lever preset.
+    leader_defending = leader_posture == "defensive_boost"
+    if l_ers_deltas is not None:
+        leader_net_mj = sum(l_ers_deltas)
+        leader_shape_s = sum(x * p for x, p in zip(l_ers_deltas, sec_pace))
+    elif leader_defending:
+        # The reactive preset: counter-deploy at the attack-matching rate.
+        leader_net_mj = LIVE_DEFENSE_NET_MJ
+        leader_shape_s = LIVE_DEFENSE_NET_MJ * sec_per_mj
+    else:
+        leader_net_mj = 0.0
+        leader_shape_s = 0.0
+    leader_on = l_ers_deltas is not None or leader_defending
+    if leader_on:
+        try:
+            l_start_pct = float(leader_battery_pct or ERS_DEFAULT_START_PCT)
+        except (TypeError, ValueError):
+            l_start_pct = ERS_DEFAULT_START_PCT
+        l_start_pct = max(30.0, min(100.0, l_start_pct))
+        leader_soc_mj = ERS_STORE_MJ * l_start_pct / 100.0
+    else:
+        leader_soc_mj = ERS_STORE_MJ * ERS_DEFAULT_START_PCT / 100.0
+    leader_deployed_mj = 0.0
+    leader_banked_mj = 0.0
+    leader_energy_limited_laps = 0
+
     closing_model, overtake_model, feature_names, _info = \
         load_overtake_models(models_dir=models_dir)
 
@@ -2101,15 +2194,66 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     closest_lap = start_lap
     closest = float(gap)
     cum = 0.0
+    l_soc_rec = None
     best_lap_prob = 0.0
     best_prob_lap = None
     pace_sum = 0.0
     n_scored = 0
     window_laps = 0
+    # Per-lap synthetic energy advantage fed to the P0 classifier (chaser
+    # SOC - leader SOC, MJ, from each side's projected store).  The leader
+    # is assumed Balanced on a mid-race store (ERS is not broadcast live and
+    # a live pit wall advises the attacking car), so its SOC walks the same
+    # Neutral shape every lap; the CHASER's SOC is exactly what the ERS
+    # lever above tracks.  When the lever is off, both sides sit at the same
+    # mid-race default and the diff stays 0.0 — the historical behaviour.
+    leader_feature_anchor_mj = (leader_soc_mj
+                                if not leader_on
+                                else ERS_STORE_MJ * ERS_DEFAULT_START_PCT
+                                / 100.0)
+    chaser_soc_for_feature_mj = (soc_mj if ers_deltas is not None
+                                 else ERS_STORE_MJ * ERS_DEFAULT_START_PCT / 100.0)
+    energy_imputed = ers_deltas is None
+    # The classifier's energy feature keeps its TRAINING semantics: the
+    # chaser's deployment advantage vs a Balanced leader on the mid-race
+    # default store.  Either side's own drain is its own SPENDING — already
+    # priced in full through the pace feature (deployed MJ x s/MJ); feeding
+    # it into energy_diff as well would double-count it as the OTHER car's
+    # advantage and could make defence raise the pass probability.  Each
+    # side's store walk still governs when its own lever must stop (the
+    # 30% floor).
 
     for L in range(start_lap, race_length + 1):
         pace = (_side_time(lm, lf, l_comp, l_age, L)
                 - _side_time(cm, cf, c_comp, c_age, L))
+        if leader_on:
+            # The leader's own ERS lever (or the defensive preset): funded
+            # deploy laps are faster by delivered MJ x measured s/MJ (pace
+            # drops — the leader is closing the door); a negative net banks
+            # energy and forgoes that pace.  Once its store hits the 30%
+            # floor it reverts to Balanced pace (same physics as the
+            # chaser's walk — no free energy on either side); banking tops
+            # out at a full store.
+            l_want = leader_net_mj
+            l_frac = 1.0 if abs(l_want) < 1e-9 else 0.0
+            if l_want > 1e-9:
+                l_avail = leader_soc_mj - ERS_FLOOR_MJ
+                if l_avail > 1e-9:
+                    l_frac = min(1.0, l_avail / l_want)
+                    leader_soc_mj -= l_want * l_frac
+                    leader_deployed_mj += l_want * l_frac
+                if l_frac < 1.0 - 1e-9:
+                    leader_energy_limited_laps += 1
+            elif l_want < -1e-9:
+                l_room = ERS_STORE_MJ - leader_soc_mj
+                if l_room > 1e-9:
+                    l_frac = min(1.0, l_room / (-l_want))
+                    leader_soc_mj += (-l_want) * l_frac
+                    leader_banked_mj += (-l_want) * l_frac
+            pace -= leader_shape_s * l_frac   # deploy: leader faster => pace drops
+            l_soc_rec = round(100.0 * leader_soc_mj / ERS_STORE_MJ, 1)
+        energy_diff = 0.0
+        energy_clipped = False
         soc_rec = None
         if ers_deltas is not None:
             # Net = MJ/lap the sector shape asks for vs Balanced (positive
@@ -2139,19 +2283,32 @@ def simulate_live_call(leader_code, chaser_code, track_name,
                     ers_banked_mj += (-want) * frac
             pace += ers_shape_s * frac   # shape value, scaled by delivery
             soc_rec = round(100.0 * soc_mj / ERS_STORE_MJ, 1)
+            chaser_soc_for_feature_mj = soc_mj
+        # else: lever off — both sides hold the mid-race default, diff = 0
+        # (leader_soc_mj is constant: Balanced is treated as store-neutral
+        # over a lap for the live projection, matching the meta's posture).
         in_window = gap <= window
         prob = 0.0
         if in_window:
+            # Synthetic energy advantage actually fed to the classifier
+            # (chaser minus leader, MJ).  Clipped to the training domain by
+            # _predict_pair_with; the flag is surfaced per lap so the sim
+            # never silently over-claims an energy-driven edge.
+            energy_diff = max(ENERGY_DIFF_CLIP_MIN,
+                              min(ENERGY_DIFF_CLIP_MAX,
+                                  chaser_soc_for_feature_mj
+                                  - leader_feature_anchor_mj))
             res = _predict_pair_with(
                 closing_model, overtake_model, feature_names,
                 gap_before_s=gap, pace_gap_s=pace,
                 chaser_tyre_age=c_age, leader_tyre_age=l_age,
                 chaser_tyre_compound=c_comp,
                 leader_tyre_compound=l_comp,
-                fuel_diff_kg=0.0, energy_diff_mj=0.0,
+                fuel_diff_kg=0.0, energy_diff_mj=energy_diff,
                 lap_number=L, track_name=track_name, year=year,
             )
             prob = float(res["overtake_probability"])
+            energy_clipped = bool(res.get("energy_clipped"))
             cum = 1.0 - (1.0 - cum) * (1.0 - prob)
             window_laps += 1
             if window_open_lap is None:
@@ -2166,9 +2323,14 @@ def simulate_live_call(leader_code, chaser_code, track_name,
             "in_window": in_window,
             "overtake_probability": round(prob, 4),
             "cumulative_probability": round(min(cum, 0.999), 4),
+            "energy_diff_mj": round(energy_diff if in_window else 0.0, 4),
+            "energy_clipped": bool(energy_clipped) if in_window else False,
+            "energy_imputed": energy_imputed,
         }
         if soc_rec is not None:
             rec["chaser_soc_pct"] = soc_rec
+        if l_soc_rec is not None:
+            rec["leader_soc_pct"] = l_soc_rec
         laps.append(rec)
         pace_sum += pace
         n_scored += 1
@@ -2188,8 +2350,26 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     )
 
     avg_pace = pace_sum / max(1, n_scored)
-    if pass_lap:
+
+    # Verdict gate (posture- and battery-aware).  A raw "cum crossed the
+    # target" no longer blindly prints ATTACK: when the projection only
+    # converts by running the store INTO its 30% floor (the pace edge fades
+    # exactly where the pass is needed) the honest call is HOLD — the
+    # window exists, but this posture buys it with the battery.  A saving
+    # posture (net-negative lever) is never called ATTACK either: the walk
+    # still accumulates probability, but the strategist asked to conserve,
+    # so the verdict must not read as a deployment order.
+    soc_end_pct = (100.0 * soc_mj / ERS_STORE_MJ) if ers_deltas is not None else None
+    saving_posture = ers_deltas is not None and net_mj < -1e-9
+    drained_at_pass = (ers_deltas is not None and pass_lap is not None
+                       and soc_end_pct is not None
+                       and soc_end_pct <= LIVE_ATTACK_MIN_SOC_PCT + LIVE_SOC_EPS_PCT)
+    if pass_lap and not saving_posture and not drained_at_pass:
         verdict = "attack"
+    elif pass_lap and saving_posture:
+        verdict = "hold"
+    elif pass_lap and drained_at_pass:
+        verdict = "hold"
     elif window_open_lap is not None:
         verdict = "attempt"
     else:
@@ -2203,6 +2383,13 @@ def simulate_live_call(leader_code, chaser_code, track_name,
                             if window_open_lap is not None else None),
         "cumulative_probability": round(min(cum, 0.999), 4),
     }
+    if verdict == "hold" and pass_lap is not None:
+        call["verdict_reason"] = (
+            "saving posture — window converts but this posture banks energy, not deploys it"
+            if saving_posture else
+            "window converts only by draining the store to its 30% floor — "
+            "the pace edge fades where the pass is needed; attack from a posture "
+            "that keeps a reserve")
     summary = {
         "avg_pace_gap_s": round(avg_pace, 4),
         "min_gap_s": round(closest, 3),
@@ -2212,13 +2399,52 @@ def simulate_live_call(leader_code, chaser_code, track_name,
         "window_laps": window_laps,
         "projected_final_gap_s": round(gap, 3),
         "projected_flag_tyre_ages": list(projected_flag_ages),
+        "leader_defense": ({
+            "posture": ("explicit_lever" if l_ers_deltas is not None
+                        else leader_posture),
+            "net_mj_per_lap": round(leader_net_mj, 3),
+            "deployed_mj": round(leader_deployed_mj, 3),
+            "banked_mj": round(leader_banked_mj, 3),
+            "energy_limited_laps": leader_energy_limited_laps,
+            "pace_s_per_lap": round(leader_shape_s, 4),
+        } if leader_on else None),
     }
     if ers_deltas is not None:
+        soc_end_pct = round(100.0 * soc_mj / ERS_STORE_MJ, 1)
+        # The SOC estimate is synthesized, not measured: report it as mean ±
+        # band (band grows with laps since the projection's anchor — here
+        # the start lap of the walk, since ERS is not broadcast live and
+        # every value in the walk is modelled).  Consumers must show the
+        # band, never the bare point.
+        from energy_simulator import battery_uncertainty_band
+        band = battery_uncertainty_band(race_length - start_lap)
         summary.update({
             "ers_deployed_mj": round(ers_deployed_mj, 3),
             "ers_banked_mj": round(ers_banked_mj, 3),
             "ers_energy_limited_laps": energy_limited_laps,
-            "chaser_soc_end_pct": round(100.0 * soc_mj / ERS_STORE_MJ, 1),
+            "chaser_soc_end_pct": soc_end_pct,
+            "chaser_soc_end_band_pct": band["band_pct"],
+            "chaser_soc_end_range_pct": [
+                round(max(0.0, soc_end_pct - band["band_pct"]), 1),
+                round(min(100.0, soc_end_pct + band["band_pct"]), 1)],
+            "attack_gate": {
+                "min_soc_pct": LIVE_ATTACK_MIN_SOC_PCT,
+                "drained_at_pass": drained_at_pass,
+                "saving_posture": saving_posture,
+                "band_pct": band["band_pct"],
+            },
+        })
+    if leader_on:
+        # Mirrored uncertainty honesty for the leader's synthesized SOC.
+        from energy_simulator import battery_uncertainty_band
+        band = battery_uncertainty_band(race_length - start_lap)
+        l_soc_end_pct = round(100.0 * leader_soc_mj / ERS_STORE_MJ, 1)
+        summary.update({
+            "leader_soc_end_pct": l_soc_end_pct,
+            "leader_soc_end_band_pct": band["band_pct"],
+            "leader_soc_end_range_pct": [
+                round(max(0.0, l_soc_end_pct - band["band_pct"]), 1),
+                round(min(100.0, l_soc_end_pct + band["band_pct"]), 1)],
         })
     meta = {
         "leader": leader_code,
@@ -2234,10 +2460,30 @@ def simulate_live_call(leader_code, chaser_code, track_name,
         },
         "window_s": window,
         "models": "aggregate career per-driver pace + P0 overtake classifier",
+        "energy_feature": {
+            "source": ("projected chaser-minus-leader store (synthetic; leader "
+                       + ("on its own ERS lever"
+                          if (l_ers_deltas is not None or leader_defending)
+                          else "assumed Balanced at the mid-race default") + ")")
+                      if ers_deltas is not None
+                      else "imputed 0.0 (no ERS lever passed)",
+            "imputed": energy_imputed,
+            "clip_min_mj": ENERGY_DIFF_CLIP_MIN,
+            "clip_max_mj": ENERGY_DIFF_CLIP_MAX,
+        },
         "extrapolation_note": (
             max(projected_flag_ages) > LIVE_MAX_SINGLE_STINT),
         "ers": {
-            "leader": "balanced",
+            "leader": ({"posture": ("explicit_lever"
+                                    if l_ers_deltas is not None
+                                    else leader_posture),
+                         "net_mj_per_lap": round(leader_net_mj, 3),
+                         "deployed_mj": round(leader_deployed_mj, 3),
+                         "banked_mj": round(leader_banked_mj, 3),
+                         "battery_start_pct": (round(l_start_pct, 1)
+                                               if leader_on else None),
+                         "energy_limited_laps": leader_energy_limited_laps}
+                        if leader_on else "balanced"),
             "chaser": ({"net_mj_per_lap": round(net_mj, 3),
                          "deltas_mj": [round(x, 3) for x in ers_deltas]}
                         if ers_deltas is not None else "balanced"),

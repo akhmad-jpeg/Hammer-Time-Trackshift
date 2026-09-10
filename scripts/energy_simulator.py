@@ -235,6 +235,45 @@ SOC_WINDOW_MAX = 0.80
 # deployment opens headroom.
 DEFAULT_START_SOC_MJ = round(BATTERY_CAPACITY_MJ, 3)  # 4.0 MJ = 100%
 
+# SOC UNCERTAINTY BAND — the synthetic state of charge is an ESTIMATE, not
+# telemetry (F1 does not broadcast the battery), so every SOC value the
+# system reports carries an explicit ± band instead of fake point precision.
+#
+#   * floor ±2% — reconstruction error from ~6 telemetry samples/lap and the
+#     downsampled speed-drop regen estimate, even at the last trusted anchor;
+#   * +0.5% per projected lap of drift — each modelled lap compounds the
+#     estimate's error (pace deviations, regen estimate noise);
+#   * cap ±8% — beyond ~12 untrusted laps the estimate is honest about being
+#     almost useless; growing past that adds no information.
+#
+# One shared function (battery_uncertainty_band) is THE definition — the
+# dashboard chart envelope, the live call and the policy engine all read the
+# same constants, so a band shown anywhere is reproducible everywhere.
+SOC_BAND_FLOOR_PCT = 2.0     # ±% at the anchor lap (best case)
+SOC_BAND_PER_LAP_PCT = 0.5   # ±% added per lap since the trusted anchor
+SOC_BAND_CAP_PCT = 8.0       # ±% ceiling
+
+
+def battery_uncertainty_band(laps_since_anchor: float,
+                             capacity_mj: float = BATTERY_CAPACITY_MJ) -> dict:
+    """The ± uncertainty band (in % and MJ) for a synthesized SOC estimate.
+
+    `laps_since_anchor` counts laps since the SOC value was anchored by a
+    simulator write (or race start).  Deterministic; the single source of
+    truth for every SOC band shown in the product.
+    """
+    band_pct = min(SOC_BAND_CAP_PCT,
+                   SOC_BAND_FLOOR_PCT
+                   + SOC_BAND_PER_LAP_PCT * max(0.0, float(laps_since_anchor)))
+    return {
+        "band_pct": round(band_pct, 2),
+        "band_mj": round(band_pct / 100.0 * capacity_mj, 4),
+        "floor_pct": SOC_BAND_FLOOR_PCT,
+        "per_lap_pct": SOC_BAND_PER_LAP_PCT,
+        "cap_pct": SOC_BAND_CAP_PCT,
+    }
+
+
 # Gentle SOC steering for the 'hold' modes: each lap the driver nudges the
 # battery this fraction of the way back toward the mode's SOC target.  Kept
 # deliberately soft -- a strong controller would pin SOC to the target and
@@ -491,6 +530,7 @@ def project_energy_trace(mode: str, battery_start_mj: float,
             "harvested_mj": round(harvested, 4),
             "end_mj": round(end_mj, 4),
             "limited": limited,
+            "soc_band_pct": battery_uncertainty_band(i)["band_pct"],
         })
         battery = end_mj
         deployed_total += deploy
@@ -506,6 +546,7 @@ def project_energy_trace(mode: str, battery_start_mj: float,
             "min_battery_mj": round(max(min_battery, 0.0), 4),
             "final_battery_mj": round(battery, 4),
             "final_battery_pct": round(battery / capacity * 100.0, 1),
+            "final_soc_band_pct": battery_uncertainty_band(n - 1)["band_pct"],
         },
     }
 

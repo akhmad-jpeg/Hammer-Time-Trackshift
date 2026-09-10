@@ -784,3 +784,55 @@
             .ctx-chips { margin-left:0; }
             .el-tabs { grid-template-columns:1fr; }
         }
+
+        /* TACTICAL OPTIONS — decision-engine panel */
+        .po-risk { display:inline-block; font-family:'Share Tech Mono',monospace; font-size:0.62em; letter-spacing:1.5px; border:1px solid; border-radius:3px; padding:2px 8px; }
+        .tbl-row.po-winner {
+            background:linear-gradient(90deg, rgba(255,215,0,0.14), rgba(255,215,0,0.02) 65%, transparent);
+            box-shadow:inset 3px 0 0 var(--gold);
+        }
+        .tbl-row.po-winner > span:first-child { color:var(--gold); }
+        .tbl-row.po-loser { opacity:0.55; }
+        .tbl-row.po-loser > span:last-child { font-style:italic; }
+        body.light-mode .tbl-row.po-winner { background:linear-gradient(90deg, rgba(255,215,0,0.18), rgba(255,215,0,0.03) 65%, transparent); }
+
+/* ── Tactical Options: leader posture toggle ─────────────────────────── */
+.po-posture {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    width: fit-content;
+}
+.po-persp-btn,
+.po-posture-btn {
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 0.78em;
+    letter-spacing: 1.5px;
+    padding: 9px 18px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.po-persp-btn + .po-persp-btn,
+.po-posture-btn + .po-posture-btn {
+    border-left: 1px solid var(--border);
+}
+.po-persp-btn:hover,
+.po-posture-btn:hover {
+    color: var(--text);
+}
+.po-persp-btn.active,
+.po-posture-btn.active {
+    background: linear-gradient(90deg, #ffd700, #ff9f43);
+    color: #14141a;
+}
+.po-persp-btn:not(.active):hover,
+.po-posture-btn:not(.active):hover {
+    background: rgba(255, 107, 107, 0.08);
+    color: #ff6b6b;
+}
