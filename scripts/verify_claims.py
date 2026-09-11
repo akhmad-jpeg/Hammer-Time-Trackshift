@@ -54,6 +54,15 @@ SKIP_DIRS = {
 # Bulk generated artifacts above this size are skipped (listed, not silent).
 MAX_SCAN_BYTES = 5 * 1024 * 1024
 
+# Files exempt from scanning, with reasons.  DECK_FIXES.md is the deck
+# remediation sheet: its job is to QUOTE the banned claim strings as examples
+# of what to remove, so it can never satisfy the guard without defeating its
+# own purpose.  Keep this list minimal and justified — every entry is a hole
+# in the guard.
+EXEMPT_FILES = {
+    'DECK_FIXES.md',
+}
+
 # Each pattern: (family name, compiled regex).  All case-insensitive.
 BANNED_PATTERNS = [
     # 1. Lap-count accuracy tolerance: a signed plus/minus-lap figure.
@@ -104,6 +113,9 @@ def iter_scan_files():
         if not path.is_file():
             continue
         if any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if path.name in EXEMPT_FILES:
+            yield path, 'skip-exempt'
             continue
         if path.suffix.lower() not in SCAN_EXTENSIONS:
             continue
