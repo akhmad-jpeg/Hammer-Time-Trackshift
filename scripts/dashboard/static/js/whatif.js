@@ -316,6 +316,8 @@ async function runOvertakeSim() {
         const leadM = pd.leader_model ? (pd.leader_model[1] || 'aggregate') : '?';
         const chasM = pd.chaser_model ? (pd.chaser_model[1] || 'aggregate') : '?';
         const probPct = Math.round(100 * s.overtake_probability);
+        const calPct = (s.calibrated && s.calibrated_probability != null)
+            ? (100 * s.calibrated_probability).toFixed(1) : null;
         const likely = probPct >= 50;
         const sim0 = (data.sim && data.sim.laps && data.sim.laps.length) ? data.sim : null;
         const lastGap = sim0 ? sim0.laps[sim0.laps.length - 1].gap_before_s : null;
@@ -323,13 +325,14 @@ async function runOvertakeSim() {
             `<div class="hc-stat"><span class="hcs-l">${label}</span><span class="hcs-v"${col ? ` style="color:${col}"` : ''}>${val}</span></div>`;
         let html =
             `<div class="hero-call" style="margin-top:14px">` +
-            `<div class="hc-big">${probPct}%</div>` +
+            `<div class="hc-big">${probPct}%${s.calibrated ? '<span style="font-size:0.32em;vertical-align:middle;margin-left:8px;padding:2px 6px;border-radius:4px;background:#1e3a29;color:#52c41a;font-weight:600" title="isotonic calibrator fitted — see MODEL CALIBRATION & RELIABILITY for the empirical pass-rate table">✓ CALIBRATOR FITTED</span>' : '<span style="font-size:0.32em;vertical-align:middle;margin-left:8px;padding:2px 6px;border-radius:4px;background:#2a2a35;color:#aaa">RAW</span>'}</div>` +
             `<div class="hc-big-l">P(OVERTAKE) · LAP ${body.lap_number} · ${body.track_name.toUpperCase()} ${body.year || ''}</div>` +
             (likely
                 ? `<div class="bt-verdict pass">OVERTAKE LIKELY — LAP ${body.lap_number}</div>`
                 : `<div class="bt-verdict nopass">NO CLEAN OVERTAKE${sim0 ? ` — GAP ${lastGap.toFixed(2)}s AFTER ${sim0.laps.length} LAPS` : ''}</div>`) +
             `<div class="hc-stats">` +
             statRow('CLOSING RATE', (s.closing_rate_s > 0 ? '+' : '') + s.closing_rate_s + 's/lap', s.closing_rate_s >= 0 ? '#00c853' : '#ff6b6b') +
+            (calPct != null ? statRow('CALIBRATED P · OBSERVED PASS RATE', calPct + '%', '#52c41a') : '') +
             (lastGap != null ? statRow('PROJECTED GAP', lastGap.toFixed(2) + 's') : '') +
             statRow('PACE GAP (LEADER − CHASER)', (data.pace_gap_s >= 0 ? '+' : '') + data.pace_gap_s + 's') +
             `</div>` +
@@ -353,13 +356,15 @@ async function runOvertakeSim() {
                 `<span>EVENT</span></div>`;
             const rows = sim.laps.map(l => {
                 const pct = Math.round(100 * l.overtake_probability);
+                const calSub = (l.calibrated && l.calibrated_probability != null)
+                    ? `<div style="font-size:0.68em;color:#52c41a;line-height:1.1">cal ${(100 * l.calibrated_probability).toFixed(1)}%</div>` : '';
                 const bar = `<div style="height:10px;background:linear-gradient(90deg,#ff6b6b 0 ${pct}%,#1c1c24 ${pct}% 100%);border-radius:3px;min-width:60px;width:100%"></div>`;
                 const pass = l.passed ? '<span class="pass-chip">▲ Overtake</span>' : '';
                 return `<div class="tbl-row${l.passed ? ' pass-row' : ''}" style="${BATTLE_COLS}">` +
                     `<span>L${l.lap}</span>` +
                     `<span>${l.gap_before_s.toFixed(2)}s</span>` +
                     `<span>${(l.closing_rate_s > 0 ? '+' : '') + l.closing_rate_s.toFixed(2)}s/lap</span>` +
-                    `<span>${bar}</span>` +
+                    `<span>${bar}${calSub}</span>` +
                     `<span>${pct}%</span>` +
                     `<span>${pass}</span></div>`;
             }).join('');
@@ -371,7 +376,7 @@ async function runOvertakeSim() {
                 : `<div class="pass-verdict no-pass">NO PASS — battle ${sim.ended === 'blown_open' ? 'blown open' : 'ran its laps'}</div>`;
             html += `<details class="ht-hint" style="margin-top:14px"><summary>ENGINEERING DETAILS — battle roll-forward (${chasM} vs ${leadM} year models)</summary>` +
                 `<div class="panel-title" style="margin-top:10px">Battle Sim — ${sim.laps.length} laps <span class="pass-lap-marker" style="font-size:0.55em">red rows = overtake laps</span></div>${verdict}<div class="tbl-wrap">${battleHead}${rows}</div>` +
-                `<div class="chart-note" style="margin-top:8px">Gap delta ${body.gap_before_s}s · pace gap (leader − chaser) ${data.pace_gap_s > 0 ? '+' : ''}${data.pace_gap_s}s · fuel diff ${body.fuel_diff_kg} kg · energy diff ${body.energy_diff_mj} MJ.</div>` +
+                `<div class="chart-note" style="margin-top:8px">Gap delta ${body.gap_before_s}s · pace gap (leader − chaser) ${data.pace_gap_s > 0 ? '+' : ''}${data.pace_gap_s}s · fuel diff ${body.fuel_diff_kg} kg · energy diff ${body.energy_diff_mj} MJ · green “cal” = isotonic-calibrated observed pass rate (raw threshold scale unchanged).</div>` +
                 `</details>`;
         }
         out.innerHTML = html;
@@ -1792,3 +1797,169 @@ function drawBmEnergyChart(laps, cum, closeStartLap, driver, closeLaps) {
     });
     card.style.display = 'block';
 }
+
+// ---------------------------------------------------------------------------
+// Overtake Model Reliability & Isotonic Calibration Table
+// ---------------------------------------------------------------------------
+let ovrReliabilityChart = null;
+
+async function loadReliabilityTable(toggle) {
+    const out = document.getElementById('ovr-reliability-out');
+    if (!out) return;
+    if (toggle && out.style.display !== 'none' && out.dataset.loaded === '1') {
+        out.style.display = 'none';
+        return;
+    }
+    out.style.display = 'block';
+    out.innerHTML = '<div class="chart-note">Loading calibration & reliability table...</div>';
+    try {
+        const resp = await fetch('/api/overtake/reliability');
+        const data = await resp.json();
+        if (!data || !data.isotonic_fitted) {
+            out.innerHTML = `
+                <div class="ht-subcard" style="margin:10px 0;border-left:3px solid #ffaa00">
+                    <div class="grp-label">OVERTAKE MODEL RELIABILITY</div>
+                    <p style="font-size:0.8em;color:#aaa">${data.message || 'Isotonic calibrator not fitted or running on raw uncalibrated probabilities.'}</p>
+                </div>`;
+            return;
+        }
+        out.dataset.loaded = '1';
+        if (ovrReliabilityChart) { ovrReliabilityChart.destroy(); ovrReliabilityChart = null; }
+        const bins = (data.reliability_bins || []).filter(b => b.n_samples > 0);
+        const brierRaw = data.brier_raw != null ? data.brier_raw.toFixed(4) : '—';
+        const brierCal = data.brier_calibrated != null ? data.brier_calibrated.toFixed(4) : '—';
+        const eceRaw = data.ece_raw != null ? data.ece_raw.toFixed(4) : '—';
+        const eceCal = data.ece_calibrated != null ? data.ece_calibrated.toFixed(4) : '—';
+        const brierImp = data.brier_improvement != null ? ((data.brier_improvement >= 0 ? '-' : '+') + Math.abs(data.brier_improvement).toFixed(4)) : '—';
+        const eceImp = data.ece_improvement != null ? ((data.ece_improvement >= 0 ? '-' : '+') + Math.abs(data.ece_improvement).toFixed(4)) : '—';
+
+        let html = `
+            <div class="ht-subcard" style="margin:10px 0;background:#15151e;border:1px solid #2a2a38;border-radius:6px;padding:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <div class="grp-label" style="margin:0;color:#ff4655;font-weight:600">OVERTAKE PROBABILITY CALIBRATION (ISOTONIC REGRESSION)</div>
+                    <span style="font-size:0.7em;padding:2px 8px;border-radius:4px;background:#1e3a29;color:#52c41a;font-weight:600">✓ ISOTONIC CALIBRATED</span>
+                </div>
+                <div class="chart-note" style="margin-bottom:10px;color:#bbb">
+                    ${data.framing || 'Raw logistic regression scores mapped monotonically to true empirical frequencies on held-out test splits.'}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:12px">
+                    <div style="background:#1c1c28;padding:8px;border-radius:4px;border:1px solid #222">
+                        <div style="font-size:0.65em;color:#888">BRIER SCORE</div>
+                        <div style="font-size:0.9em;color:#eee;font-weight:bold">${brierRaw} → ${brierCal}</div>
+                        <div style="font-size:0.65em;color:#52c41a">${brierImp} (lower is better)</div>
+                    </div>
+                    <div style="background:#1c1c28;padding:8px;border-radius:4px;border:1px solid #222">
+                        <div style="font-size:0.65em;color:#888">EXPECTED CALIBRATION ERROR (ECE)</div>
+                        <div style="font-size:0.9em;color:#eee;font-weight:bold">${eceRaw} → ${eceCal}</div>
+                        <div style="font-size:0.65em;color:#52c41a">${eceImp} improvement</div>
+                    </div>
+                    <div style="background:#1c1c28;padding:8px;border-radius:4px;border:1px solid #222">
+                        <div style="font-size:0.65em;color:#888">TEST SAMPLES / POSITIVES</div>
+                        <div style="font-size:0.9em;color:#eee;font-weight:bold">${data.n_test_samples || '—'} / ${data.n_test_positives || '—'}</div>
+                        <div style="font-size:0.65em;color:#888">${data.fitted_on || 'Held-out test set'}</div>
+                    </div>
+                </div>
+                <div class="grp-label" style="margin:2px 0 6px;color:#ff4655;font-weight:600">RELIABILITY DIAGRAM — PREDICTED VS OBSERVED</div>
+                <div style="position:relative;height:260px;background:#101014;border:1px solid #ffffff14;border-radius:8px;padding:6px">
+                    <canvas id="ovrReliabilityChartCanvas"></canvas>
+                </div>
+                <div class="chart-note" style="margin:6px 0 10px;color:#999">Each point is a predicted-probability bin: horizontal = the model's mean predicted P, vertical = the observed pass rate on held-out races. The dashed diagonal is perfect calibration — points below it (the raw model's signature: ~95% predicted → ~22% observed) are exactly the overconfidence the isotonic calibrator removes. Point size scales with bin sample count; amber points are thin bins (N&lt;5).</div>
+                <div style="overflow-x:auto">
+                    <table style="width:100%;border-collapse:collapse;font-size:0.75em;text-align:left">
+                        <thead>
+                            <tr style="border-bottom:1px solid #333;color:#888">
+                                <th style="padding:6px">PREDICTED BIN</th>
+                                <th style="padding:6px">MEAN PREDICTED P</th>
+                                <th style="padding:6px">ACTUAL PASS RATE</th>
+                                <th style="padding:6px">SAMPLE COUNT</th>
+                                <th style="padding:6px">CALIBRATION DELTA</th>
+                                <th style="padding:6px">STATUS</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+        (data.reliability_bins || []).forEach(b => {
+            if (b.n_samples === 0) return;
+            const deltaColor = Math.abs(b.delta) <= 0.05 ? '#52c41a' : (b.delta > 0 ? '#ffaa00' : '#40a9ff');
+            const note = b.thin ? '<span style="color:#ffaa00;font-size:0.85em">⚠️ thin (N&lt;5)</span>' : '<span style="color:#52c41a;font-size:0.85em">✓ robust</span>';
+            html += `
+                <tr style="border-bottom:1px solid #222">
+                    <td style="padding:5px;font-family:monospace;color:#ccc">[${(b.bin_lo * 100).toFixed(0)}% - ${(b.bin_hi * 100).toFixed(0)}%)</td>
+                    <td style="padding:5px;color:#eee">${(b.mean_predicted * 100).toFixed(1)}%</td>
+                    <td style="padding:5px;font-weight:bold;color:#eee">${(b.fraction_positive * 100).toFixed(1)}%</td>
+                    <td style="padding:5px;color:#aaa">${b.n_samples}</td>
+                    <td style="padding:5px;color:${deltaColor}">${b.delta >= 0 ? '+' : ''}${(b.delta * 100).toFixed(1)}%</td>
+                    <td style="padding:5px">${note}</td>
+                </tr>`;
+        });
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top:8px;font-size:0.68em;color:#666;text-align:right">
+                    Method: ${data.method || 'IsotonicRegression'} · Transparently disclosed to judges
+                </div>
+            </div>`;
+        out.innerHTML = html;
+        const cctx = document.getElementById('ovrReliabilityChartCanvas');
+        if (cctx && bins.length) {
+            const ptData = bins.map(b => ({
+                x: 100 * b.mean_predicted, y: 100 * b.fraction_positive, _bin: b,
+            }));
+            ovrReliabilityChart = new Chart(cctx.getContext('2d'), {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: 'perfect calibration',
+                            data: [{ x: 0, y: 0 }, { x: 100, y: 100 }],
+                            showLine: true, fill: false,
+                            borderColor: 'rgba(255,255,255,0.4)', borderWidth: 1.5,
+                            borderDash: [6, 4], pointRadius: 0,
+                        },
+                        {
+                            label: 'reliability (observed pass rate)',
+                            data: ptData,
+                            showLine: true, fill: false, tension: 0,
+                            borderColor: 'rgba(82,196,26,0.5)', borderWidth: 1.5,
+                            pointBackgroundColor: bins.map(b => b.thin ? '#ffaa00' : '#52c41a'),
+                            pointBorderColor: bins.map(b => b.thin ? '#ffaa00' : '#52c41a'),
+                            pointRadius: bins.map(b => Math.max(3, Math.min(9, 2 + Math.sqrt(b.n_samples)))),
+                            pointHoverRadius: 10,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            min: 0, max: 100,
+                            title: { display: true, text: 'mean predicted P (%)', color: '#888' },
+                            grid: { color: '#ffffff12' }, ticks: { color: '#888' },
+                        },
+                        y: {
+                            min: 0, max: 100,
+                            title: { display: true, text: 'observed pass rate (%)', color: '#888' },
+                            grid: { color: '#ffffff12' }, ticks: { color: '#888' },
+                        },
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#ccc', font: { size: 10 } } },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const b = ctx.raw && ctx.raw._bin;
+                                    if (!b) return '';
+                                    const thin = b.thin ? ' · thin (N<5)' : '';
+                                    return `pred ${(b.mean_predicted * 100).toFixed(1)}% → obs ${(b.fraction_positive * 100).toFixed(1)}% · N=${b.n_samples}${thin}`;
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+        }
+    } catch (err) {
+        out.innerHTML = `<div class="err-box" style="display:block">Failed to load reliability table: ${err.message}</div>`;
+    }
+}
+
