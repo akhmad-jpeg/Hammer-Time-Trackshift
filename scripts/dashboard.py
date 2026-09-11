@@ -473,7 +473,7 @@ def simulate_session_energy_api(session_id):
 
         ids = [l['lap_id'] for l in laps]
         ph = ','.join(['%s'] * len(ids))
-        cursor.execute(f"SELECT lap_id, speed FROM telemetry "
+        cursor.execute(f"SELECT lap_id, speed, time_s FROM telemetry "
                        f"WHERE lap_id IN ({ph}) ORDER BY telemetry_id", ids)
         telem = {}
         for row in cursor.fetchall():
@@ -1828,7 +1828,7 @@ def analyze_energy_modes():
         future_ids = [l['lap_id'] for l in future]
         if future_ids:
             ph = ','.join(['%s'] * len(future_ids))
-            cursor.execute(f"SELECT lap_id, speed FROM telemetry WHERE lap_id IN ({ph}) ORDER BY telemetry_id", future_ids)
+            cursor.execute(f"SELECT lap_id, speed, time_s FROM telemetry WHERE lap_id IN ({ph}) ORDER BY telemetry_id", future_ids)
             telem = {}
             for row in cursor.fetchall():
                 telem.setdefault(row['lap_id'], []).append(row)
@@ -2151,7 +2151,7 @@ def energy_sandbox():
         lap_time_s = (float(ctx['lap_time_ms'] or 0.0) / 1000.0) or 1.0
 
         cursor.execute("""
-            SELECT speed, throttle, brake FROM telemetry
+            SELECT speed, throttle, brake, time_s FROM telemetry
             WHERE lap_id = %s ORDER BY telemetry_id
         """, (ctx['lap_id'],))
         samples = cursor.fetchall()
@@ -2953,6 +2953,45 @@ def overtake_calibration():
             except: pass
 
 
+@app.route('/api/overtake/reliability', methods=['GET'])
+def overtake_reliability():
+    """Return the isotonic calibration curve and reliability bins.
+
+    Surfaces the empirical reliability table and calibration metrics from
+    model_info.json, backing the honest probabilistic claims in the UI.
+    """
+    try:
+        cal_info, pkl_exists = overtake_inference.load_reliability_table()
+        if cal_info is None:
+            return jsonify({
+                "calibrated": False,
+                "isotonic_fitted": False,
+                "message": "Isotonic calibrator not fitted or model_info.json missing",
+                "reliability_bins": [],
+            })
+        return jsonify({
+            "calibrated": pkl_exists,
+            "isotonic_fitted": True,
+            "brier_raw": cal_info.get("brier_raw"),
+            "brier_calibrated": cal_info.get("brier_calibrated"),
+            "brier_improvement": cal_info.get("brier_improvement"),
+            "ece_raw": cal_info.get("ece_raw"),
+            "ece_calibrated": cal_info.get("ece_calibrated"),
+            "ece_improvement": cal_info.get("ece_improvement"),
+            "n_test_samples": cal_info.get("n_test_samples"),
+            "n_test_positives": cal_info.get("n_test_positives"),
+            "n_bins": cal_info.get("n_bins"),
+            "reliability_bins": cal_info.get("reliability_bins", []),
+            "method": cal_info.get("method", "IsotonicRegression"),
+            "fitted_on": cal_info.get("fitted_on", "held-out test split"),
+            "framing": (cal_info.get("framing")
+                        or "We rank attack windows with calibrated probabilities, backed by observed empirical pass rates.")
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/overtake/sim', methods=['POST'])
 def overtake_sim():
     """Predict one leader/chaser lap (or a short battle) with the P0 model.
@@ -3248,6 +3287,8 @@ def _simulate_battle(leader_code, chaser_code, track_name, lap_number,
             "lap": L, "gap_before_s": round(gap, 2),
             "closing_rate_s": round(closing, 3),
             "overtake_probability": prob, "passed": passed,
+            "calibrated_probability": res.get("calibrated_probability"),
+            "calibrated": bool(res.get("calibrated")),
         })
         if passed:
             pass_lap = L

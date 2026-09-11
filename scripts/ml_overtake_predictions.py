@@ -46,8 +46,16 @@ Features — both agents, reused machinery
 Training mirrors ml_lap_predictions.py: LinearRegression vs RandomForest
 for the closing rate (selection on within-race MAE), LogisticRegression vs
 RandomForest for the overtake probability (selection on within-race ROC-AUC,
-with class_weight='balanced' because overtakes are ~4% of battle laps), plus
-a group-held-out race split reported for transparency.
+with class_weight='balanced' because overtakes are ~4% of battle laps).
+
+The overtake head is trained on a TIME-ORDERED split: seasons before the
+cutoff train the model, later seasons are held out entirely for model
+selection, isotonic calibration and testing.  A random split lets
+future-regime races leak into the fit, so the reliability table would
+describe interpolation instead of the live use case (predicting forward).
+It falls back to a random 20% split — recorded in the artifacts — only when
+the held-out years cannot support a classifier/calibrator.  A group-held-out
+race split is still reported for transparency.
 
 Artifacts (ml_models/overtake/): closing_model.pkl, overtake_model.pkl,
 feature_names.pkl, model_info.json, model_info.txt, training_pairs.csv.
@@ -77,9 +85,11 @@ from overtake_inference import (
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import (
     mean_absolute_error, mean_squared_error, r2_score,
     roc_auc_score, accuracy_score, precision_score, recall_score,
+    brier_score_loss,
 )
 
 # ---------------------------------------------------------------------------
@@ -95,6 +105,13 @@ SC_VSC_REDFLAG_RATIO = 1.30
 # First N laps of each stint dropped (cold tyres / traffic / race start).
 STINT_WARMUP_LAPS = 2
 MIN_PAIR_LAPS = 40  # need at least this many battle laps before training
+
+# Time-ordered split for the overtake head: every season BEFORE this one
+# trains the model; this season and later are held out entirely (selection,
+# isotonic calibration, testing).  Training on the future is leakage — a
+# random split lets later-regime races into the fit and flatters every
+# reported metric.  Only a fallback when the held-out block lacks positives.
+TEMPORAL_SPLIT_CUTOFF = 2024
 
 LAPS_QUERY = """
 SELECT
@@ -336,7 +353,7 @@ def build_features(pairs):
         })
 
     if not feats:
-        return None, None, None, [], stats, None
+        return None, None, None, [], stats, None, None
     feat_df = pd.DataFrame(feats)
     # Keep the ORIGINAL pair row index so race-holdout grouping stays aligned
     # with X (feat_df gets a fresh RangeIndex, pairs does not).
@@ -350,7 +367,47 @@ def build_features(pairs):
     )
     feature_names = list(X.columns)
     groups = pairs.loc[pair_idx, "track_name"]  # aligned with X rows
-    return X, y_close, y_overtake, feature_names, stats, groups
+    years = pairs.loc[pair_idx, "year"].astype(int).to_numpy()
+    return X, y_close, y_overtake, feature_names, stats, groups, years
+
+
+def make_temporal_split(X, y, years, cutoff=TEMPORAL_SPLIT_CUTOFF):
+    """Time-ordered train/test split for the overtake head.
+
+    Train on every season BEFORE ``cutoff``; hold out ``cutoff`` and later
+    entirely — model selection, isotonic calibration and testing all happen
+    out-of-time.  A random split would let future-regime races leak into the
+    fit and flatter every metric; the reliability table would then describe
+    interpolation, not the live use case (predicting forward).
+
+    Returns (train_idx, test_idx, info) with POSITIONAL indices into X/y, or
+    (None, None, reason_dict) when the temporal split cannot support training
+    + calibration (either side short on samples or positives) — the caller
+    falls back to a random 20% split and records why.
+    """
+    yrs = pd.Series(years).reset_index(drop=True)
+    y = pd.Series(y).reset_index(drop=True)
+    train_mask = yrs < cutoff
+    test_mask = ~train_mask
+    if not train_mask.any() or not test_mask.any():
+        return None, None, {"type": "random_20pct_fallback",
+                            "reason": f"no samples on one side of the "
+                                      f"{cutoff} cutoff"}
+    if int(y[train_mask].sum()) < 3 or int(y[test_mask].sum()) < 3:
+        return None, None, {"type": "random_20pct_fallback",
+                            "reason": "fewer than 3 positive labels on one "
+                                      f"side of the {cutoff} cutoff"}
+    info = {
+        "type": "time_ordered",
+        "cutoff_year": int(cutoff),
+        "train_years": sorted(int(v) for v in yrs[train_mask].unique()),
+        "test_years": sorted(int(v) for v in yrs[test_mask].unique()),
+        "train_samples": int(train_mask.sum()),
+        "test_samples": int(test_mask.sum()),
+        "train_positives": int(y[train_mask].sum()),
+        "test_positives": int(y[test_mask].sum()),
+    }
+    return np.where(train_mask)[0], np.where(test_mask)[0], info
 
 
 def train_and_eval_reg(X_tr, y_tr, X_te, y_te):
@@ -412,6 +469,104 @@ def fmt_clf(m):
             f"prec {m['precision']:.3f}  rec {m['recall']:.3f}")
 
 
+def fit_isotonic_calibrator(clf, X_te, y_te, n_bins=10,
+                            fitted_on="held-out test split (20% of training pairs)",
+                            framing=None):
+    """Fit an IsotonicRegression calibrator on the held-out test split.
+
+    Uses the raw predict_proba scores from the already-selected best
+    classifier (so the calibrator never touches training data) and returns
+    (calibrator, calibration_info) where calibration_info contains:
+
+      * brier_raw        — Brier score of the uncalibrated model on the test set
+      * brier_calibrated — Brier score after isotonic mapping
+      * ece_raw          — Expected Calibration Error before calibration
+      * ece_calibrated   — Expected Calibration Error after calibration
+      * reliability_bins — list of {bin_lo, bin_hi, bin_center, mean_predicted,
+                           fraction_positive, n_samples, delta, thin} dicts,
+                           one per fixed-width probability bin (width=1/n_bins).
+                           ``thin`` is True when n_samples < 5.
+
+    When the test set has fewer than 10 positive samples (too few to fit
+    a meaningful calibration curve) the function raises RuntimeError so the
+    caller can skip saving the calibrator rather than silently storing garbage.
+    """
+    y_arr = np.array(y_te)
+    if y_arr.sum() < 3:
+        raise RuntimeError(
+            f"Only {int(y_arr.sum())} positive samples on the test split — "
+            "too few to fit a meaningful isotonic calibrator.  Rerun with "
+            "more data or a larger training set.")
+
+    raw_probs = clf.predict_proba(X_te)[:, 1]
+
+    # Fit isotonic regression: maps raw scores monotonically to [0,1].
+    calibrator = IsotonicRegression(out_of_bounds="clip")
+    calibrator.fit(raw_probs, y_arr)
+    cal_probs = calibrator.predict(raw_probs)
+
+    # Brier scores (lower = better).
+    brier_raw = float(brier_score_loss(y_arr, raw_probs))
+    brier_cal = float(brier_score_loss(y_arr, cal_probs))
+
+    # Fixed-width reliability bins.
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    bins = []
+    for i in range(n_bins):
+        lo, hi = float(bin_edges[i]), float(bin_edges[i + 1])
+        mask = (raw_probs >= lo) & (raw_probs < hi if i < n_bins - 1 else raw_probs <= hi)
+        n = int(mask.sum())
+        if n > 0:
+            mean_pred = float(raw_probs[mask].mean())
+            frac_pos = float(y_arr[mask].mean())
+        else:
+            mean_pred = (lo + hi) / 2.0
+            frac_pos = 0.0
+        bins.append({
+            "bin_lo": round(lo, 3),
+            "bin_hi": round(hi, 3),
+            "bin_center": round((lo + hi) / 2.0, 3),
+            "mean_predicted": round(mean_pred, 4),
+            "fraction_positive": round(frac_pos, 4),
+            "n_samples": n,
+            "delta": round(frac_pos - mean_pred, 4),
+            "thin": n < 5,
+        })
+
+    # ECE: weighted mean |predicted - actual| across non-empty bins.
+    def _ece(probs):
+        total = len(probs)
+        err = 0.0
+        for i in range(n_bins):
+            lo, hi = bin_edges[i], bin_edges[i + 1]
+            mask = (probs >= lo) & (probs < hi if i < n_bins - 1 else probs <= hi)
+            n = mask.sum()
+            if n > 0:
+                err += (n / total) * abs(probs[mask].mean() - y_arr[mask].mean())
+        return float(err)
+
+    ece_raw = _ece(raw_probs)
+    ece_cal = _ece(cal_probs)
+
+    calibration_info = {
+        "n_test_samples": int(len(y_arr)),
+        "n_test_positives": int(y_arr.sum()),
+        "brier_raw": round(brier_raw, 5),
+        "brier_calibrated": round(brier_cal, 5),
+        "brier_improvement": round(brier_raw - brier_cal, 5),
+        "ece_raw": round(ece_raw, 5),
+        "ece_calibrated": round(ece_cal, 5),
+        "ece_improvement": round(ece_raw - ece_cal, 5),
+        "n_bins": n_bins,
+        "reliability_bins": bins,
+        "fitted_on": fitted_on,
+        "framing": (framing or "Raw scores mapped monotonically to true "
+                    "empirical frequencies on held-out races."),
+        "method": "IsotonicRegression(out_of_bounds='clip')",
+    }
+    return calibrator, calibration_info
+
+
 def main():
     global GAP_WINDOW_S, OVERTAKE_GAP_MAX_S
     parser = argparse.ArgumentParser(
@@ -422,6 +577,11 @@ def main():
     parser.add_argument("--overtake-max-gap", type=float,
                         default=OVERTAKE_GAP_MAX_S,
                         help="max gap before (s) for a trusted overtake label")
+    parser.add_argument("--split-cutoff", type=int,
+                        default=TEMPORAL_SPLIT_CUTOFF,
+                        help="overtake head trains on seasons BEFORE this "
+                             "year; this year and later are held out for "
+                             "selection/calibration/testing (out-of-time)")
     args = parser.parse_args()
     GAP_WINDOW_S = args.gap_window
     OVERTAKE_GAP_MAX_S = args.overtake_max_gap
@@ -450,13 +610,18 @@ def main():
     print(f"[INFO] Battle laps (gap <= {GAP_WINDOW_S:.1f}s): {len(pairs)}")
     print(f"[INFO] Overtake labels: {int(pairs['overtake'].sum())} "
           f"({100 * pairs['overtake'].mean():.1f}% of battle laps)")
+    print("  per season (time-ordering reference):")
+    for yr, g in (pairs.groupby("year")["overtake"]
+                  .agg(["size", "sum"]).iterrows()):
+        print(f"    {yr}: {int(g['size'])} battle laps, {int(g['sum'])} overtakes")
     by_race = pairs.groupby(["track_name", "date"]).size().sort_values(ascending=False)
     print("  per race (top 10):")
     for (t, d), n in by_race.head(10).items():
         print(f"    {str(d)[:10]} {str(t):<42} {n} battle laps")
 
     print("\n[FEATURES] Engineering head-to-head features...")
-    X, y_close, y_overtake, feature_names, stats, groups = build_features(pairs)
+    X, y_close, y_overtake, feature_names, stats, groups, years = \
+        build_features(pairs)
     if X is None:
         print("[ERROR] No sample could be scored by the per-driver pace models.")
         sys.exit(1)
@@ -504,8 +669,25 @@ def main():
     print("=" * 60)
     print(f"  Positive rate: {y_overtake.mean():.1%}  "
           f"(baseline always-0 accuracy {1 - y_overtake.mean():.1%})")
-    X_tr, X_te, y_tr, y_te = train_test_split(
-        X, y_overtake, test_size=0.2, random_state=42)
+    # TIME-ORDERED split: train on seasons before the cutoff, hold out the
+    # later seasons for selection/calibration/testing.  Falls back to a
+    # random 20% split only when the held-out years lack positives (recorded
+    # in the artifacts either way).
+    tr_idx, te_idx, split_info = make_temporal_split(
+        X, y_overtake, years, cutoff=args.split_cutoff)
+    if tr_idx is not None:
+        X_tr, X_te = X.iloc[tr_idx], X.iloc[te_idx]
+        y_tr, y_te = y_overtake.iloc[tr_idx], y_overtake.iloc[te_idx]
+        print(f"  [SPLIT] TIME-ORDERED: train {split_info['train_years']} "
+              f"({split_info['train_samples']} samples / "
+              f"{split_info['train_positives']} positives)  ->  "
+              f"hold out {split_info['test_years']} "
+              f"({split_info['test_samples']} samples / "
+              f"{split_info['test_positives']} positives)")
+    else:
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X, y_overtake, test_size=0.2, random_state=42)
+        print(f"  [SPLIT] random 20% fallback — {split_info.get('reason')}")
     clf_ev = train_and_eval_clf(X_tr, y_tr, X_te, y_te)
     for name, (_, m) in clf_ev.items():
         print(f"  {name:<18} {fmt_clf(m)}")
@@ -523,6 +705,52 @@ def main():
                           for k, (_, m) in unseen_c.items()))
 
     # ------------------------------------------------------------------
+    # ISOTONIC CALIBRATION
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("ISOTONIC CALIBRATION -- mapping raw scores to true probabilities")
+    print("=" * 60)
+    isotonic_calibrator = None
+    isotonic_info = None
+    if split_info.get("type") == "time_ordered":
+        test_years = split_info["test_years"]
+        iso_fitted_on = (f"held-out later seasons ({test_years[0]}-"
+                         f"{test_years[-1]}) — time-ordered split")
+        iso_framing = ("Out-of-time calibration: raw scores mapped to observed "
+                       "pass rates on LATER seasons the model never saw in "
+                       "training — the reliability table is honest, not "
+                       "flattering.")
+    else:
+        iso_fitted_on = "held-out test split (20% of training pairs)"
+        iso_framing = None
+    try:
+        isotonic_calibrator, isotonic_info = fit_isotonic_calibrator(
+            ov_model, X_te, y_te, fitted_on=iso_fitted_on, framing=iso_framing)
+        print(f"  Brier score:  raw {isotonic_info['brier_raw']:.5f}  "
+              f"->  calibrated {isotonic_info['brier_calibrated']:.5f}  "
+              f"(improvement {isotonic_info['brier_improvement']:+.5f})")
+        print(f"  ECE:          raw {isotonic_info['ece_raw']:.5f}  "
+              f"->  calibrated {isotonic_info['ece_calibrated']:.5f}  "
+              f"(improvement {isotonic_info['ece_improvement']:+.5f})")
+        print(f"  Test set:     {isotonic_info['n_test_samples']} samples  "
+              f"({isotonic_info['n_test_positives']} positives)")
+        print("  Reliability bins (raw predicted -> actual pass rate):")
+        print(f"  {'Bin':<12} {'Mean pred':>9} {'Actual':>8} {'N':>5}  "
+              f"{'Delta':>7}  note")
+        for b in isotonic_info["reliability_bins"]:
+            if b["n_samples"] == 0:
+                continue
+            note = "thin" if b["thin"] else ""
+            delta_txt = f"{b['delta']:+.4f}"
+            print(f"  [{b['bin_lo']:.2f},{b['bin_hi']:.2f})  "
+                  f"{b['mean_predicted']:>9.4f} "
+                  f"{b['fraction_positive']:>8.4f} "
+                  f"{b['n_samples']:>5}  "
+                  f"{delta_txt:>7}  {note}")
+    except RuntimeError as exc:
+        print(f"  [SKIP] Isotonic calibration skipped: {exc}")
+
+    # ------------------------------------------------------------------
     # Artifacts
     # ------------------------------------------------------------------
     out_dir = OVERTAKE_MODEL_DIR
@@ -530,6 +758,8 @@ def main():
     joblib.dump(close_model, out_dir / "closing_model.pkl")
     joblib.dump(ov_model, out_dir / "overtake_model.pkl")
     joblib.dump(feature_names, out_dir / "feature_names.pkl")
+    if isotonic_calibrator is not None:
+        joblib.dump(isotonic_calibrator, out_dir / "isotonic_calibrator.pkl")
     pairs.to_csv(out_dir / "training_pairs.csv", index=False)
 
     metadata = {
@@ -561,8 +791,10 @@ def main():
         },
         "training_samples": int(len(X_tr)),
         "test_samples": int(len(X_te)),
+        "split": split_info,
         "features": feature_names,
         "coverage": {"tracks": covered_tracks(feature_names)},
+        "isotonic_calibration": isotonic_info,  # None when skipped
         "trained_at": datetime.now().isoformat(),
     }
     with open(out_dir / "model_info.json", "w", encoding="utf-8") as f:
@@ -580,8 +812,23 @@ def main():
                 f"{int(pairs['overtake'].sum())} overtake labels "
                 f"({100 * pairs['overtake'].mean():.1f}%)\n")
         f.write(f"Features:            {len(feature_names)}\n")
+        if split_info.get("type") == "time_ordered":
+            f.write(f"Split:               time-ordered — train "
+                    f"{split_info['train_years']}, hold out "
+                    f"{split_info['test_years']} (out-of-time)\n")
+        else:
+            f.write(f"Split:               random 20% fallback "
+                    f"({split_info.get('reason')})\n")
         f.write(f"Energy coverage:     {metadata['energy_diff']['coverage']:.1%} "
                 f"(race_state rows present)\n")
+        if isotonic_info:
+            f.write(f"Isotonic calibration: fitted  "
+                    f"(Brier {isotonic_info['brier_raw']:.5f} → "
+                    f"{isotonic_info['brier_calibrated']:.5f},  "
+                    f"ECE {isotonic_info['ece_raw']:.5f} → "
+                    f"{isotonic_info['ece_calibrated']:.5f})\n")
+        else:
+            f.write("Isotonic calibration: skipped (too few positives on test split)\n")
         f.write(f"Trained at:          {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("Tracks covered:\n")
         for t in covered_tracks(feature_names):
@@ -594,6 +841,10 @@ def main():
     print(f"[SAVED] {out_dir}/closing_model.pkl")
     print(f"[SAVED] {out_dir}/overtake_model.pkl")
     print(f"[SAVED] {out_dir}/feature_names.pkl")
+    if isotonic_calibrator is not None:
+        print(f"[SAVED] {out_dir}/isotonic_calibrator.pkl")
+    else:
+        print("[SKIP]  isotonic_calibrator.pkl (skipped — see reason above)")
     print(f"[SAVED] {out_dir}/model_info.json")
     print(f"[SAVED] {out_dir}/model_info.txt")
     print(f"[SAVED] {out_dir}/training_pairs.csv")

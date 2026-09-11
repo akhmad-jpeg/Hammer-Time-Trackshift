@@ -5,8 +5,12 @@ a leader/chaser head-to-head context into:
 
   * closing_rate_s      — predicted gap closure during the lap, in seconds
                           (positive = the chaser gains on the leader).
-  * overtake_probability — predicted probability the chaser gets past the
-                          leader during the lap.
+  * overtake_probability — the classifier's raw per-lap pass score.  All
+    decision thresholds (the 0.5 trigger, the 0.8 cumulative live-call
+    gate) are tuned on THIS scale, so it is what callers must threshold.
+    The isotonic-calibrated value — the same score mapped to the observed
+    pass rate on held-out races — is returned alongside as
+    ``calibrated_probability`` (see _predict_pair_with).
 
 The training set is built from PAIRED laps: two drivers racing the same race,
 reconstructed into a per-lap head-to-head via their cumulative race clocks
@@ -198,7 +202,14 @@ def _pin_in_process(model):
 def load_overtake_models(models_dir=None):
     """Return (closing_model, overtake_model, feature_names, info_dict).
 
-    Raises FileNotFoundError with a clear message when the artifacts are
+    When ``ml_models/overtake/isotonic_calibrator.pkl`` is present it is
+    loaded and attached to the returned info dict under the key
+    ``_isotonic_calibrator`` so every caller gets calibrated probabilities
+    automatically without any interface change.  The calibrator is silently
+    absent (``info["_isotonic_calibrator"] = None``) when the file does not
+    exist — all callers degrade gracefully to raw probabilities.
+
+    Raises FileNotFoundError with a clear message when the core artifacts are
     missing (train them with scripts/ml_overtake_predictions.py).
     """
     base = Path(models_dir) if models_dir else OVERTAKE_MODEL_DIR
@@ -223,6 +234,14 @@ def load_overtake_models(models_dir=None):
             info = json_load(info_path)
         except Exception:
             info = {}
+    # Silently load the isotonic calibrator when present.
+    cal_path = base / "isotonic_calibrator.pkl"
+    info["_isotonic_calibrator"] = None
+    if cal_path.exists():
+        try:
+            info["_isotonic_calibrator"] = joblib.load(cal_path)
+        except Exception:
+            pass  # corrupt pkl — degrade to raw probs, never crash
     return closing_model, overtake_model, feature_names, info
 
 
@@ -230,6 +249,30 @@ def json_load(path):
     import json
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def load_reliability_table(models_dir=None):
+    """Return the isotonic calibration reliability table from model_info.json.
+
+    Reads the pre-computed ``isotonic_calibration`` block that the trainer
+    writes when it successfully fits the calibrator.  Returns the block dict
+    (keys: brier_raw, brier_calibrated, ece_raw, ece_calibrated,
+    reliability_bins, …) or None when the file is absent or the calibrator
+    was not fitted.  Also returns whether the calibrator pkl itself is present
+    so callers can distinguish "fitted" from "fitted but pkl missing".
+
+    No model loading is performed — this is a pure JSON read.
+    """
+    base = Path(models_dir) if models_dir else OVERTAKE_MODEL_DIR
+    info_path = base / "model_info.json"
+    cal_path = base / "isotonic_calibrator.pkl"
+    if not info_path.exists():
+        return None, False
+    try:
+        info = json_load(info_path)
+    except Exception:
+        return None, False
+    return info.get("isotonic_calibration"), cal_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -605,7 +648,7 @@ def load_session_race_laps(session_id, conn=None):
         ids = [l['lap_id'] for l in laps]
         ph = ','.join(['%s'] * len(ids))
         cur.execute(
-            f"SELECT lap_id, speed, throttle, brake FROM telemetry "
+            f"SELECT lap_id, speed, throttle, brake, time_s FROM telemetry "
             f"WHERE lap_id IN ({ph}) ORDER BY telemetry_id", ids)
         telem = {}
         for row in cur.fetchall():
@@ -1084,7 +1127,7 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                 f"start_lap {start} is beyond the race's last shared lap "
                 f"({race_end}).")
 
-        closing_model, overtake_model, feature_names, _info = \
+        closing_model, overtake_model, feature_names, _overtake_info = \
             load_overtake_models(models_dir=models_dir)
 
         gap0 = float(gap_before_s)
@@ -1339,6 +1382,7 @@ def simulate_full_race(leader_session_id, chaser_session_id, start_lap=1,
                     leader_tyre_compound=llap['tyre_compound'],
                     fuel_diff_kg=fuel_diff, energy_diff_mj=energy_diff,
                     lap_number=L, track_name=track, year=year,
+                    info=_overtake_info,
                 )
                 closing = res['closing_rate_s']
                 prob = res['overtake_probability']
@@ -1751,24 +1795,34 @@ def _predict_pair_with(closing_model, overtake_model, feature_names,
                        chaser_tyre_age, leader_tyre_age,
                        chaser_tyre_compound, leader_tyre_compound,
                        fuel_diff_kg, energy_diff_mj,
-                       lap_number, track_name, year):
+                       lap_number, track_name, year,
+                       info=None):
     """Score one head-to-head lap with ALREADY-LOADED models.
 
     predict_overtake loads the artifacts then delegates here; the P1 race
     simulator loads them once for the whole race and calls this directly,
     so a multi-lap what-if does not re-read the model files per lap.
 
-    Returns {closing_rate_s, overtake_probability, track_covered}.
+    Two-scale probability contract (deliberate):
+
+      * overtake_probability / raw_overtake_probability — the classifier's
+        RAW predict_proba score.  Every decision threshold in the codebase
+        (RACE_TRIGGER_PROB=0.5, the battle sim's OVERTAKE_TRIGGER_PROB, the
+        live call's 0.8 cumulative gate, the policy engine's 0.75 checks)
+        was tuned on the raw scale, so this is the score callers threshold.
+      * calibrated_probability — the raw score mapped through the isotonic
+        calibrator when ``info`` carries an ``_isotonic_calibrator`` key
+        (populated by ``load_overtake_models``).  Isotonic calibration
+        compresses the raw scale toward observed pass rates (raw 0.9 ->
+        calibrated ~0.08, raw 0.95 -> ~0.32 on the current artifact), so
+        the two numbers are NOT interchangeable and calibrated values must
+        never be compared against raw-scale thresholds.
+      * calibrated — True iff the isotonic mapping was applied.
+
+    Returns {closing_rate_s, overtake_probability, calibrated_probability,
+             raw_overtake_probability, calibrated, energy_clipped,
+             track_covered}.
     """
-    row = construct_pair_row(
-        gap_before_s=gap_before_s, pace_gap_s=pace_gap_s,
-        chaser_tyre_age=chaser_tyre_age, leader_tyre_age=leader_tyre_age,
-        chaser_tyre_compound=chaser_tyre_compound,
-        leader_tyre_compound=leader_tyre_compound,
-        fuel_diff_kg=fuel_diff_kg, energy_diff_mj=energy_diff_mj,
-        lap_number=lap_number, track_name=track_name,
-        feature_names=feature_names, year=year,
-    )
     # Keep energy_diff inside the domain where the models were trained
     # (see ENERGY_DIFF_CLIP_*); asymmetric ERS what-ifs can otherwise push
     # it to +/-2 MJ where the closing regressor extrapolates to absurd
@@ -1788,12 +1842,29 @@ def _predict_pair_with(closing_model, overtake_model, feature_names,
     )
     closing = float(closing_model.predict(row)[0])
     if hasattr(overtake_model, "predict_proba"):
-        prob = float(overtake_model.predict_proba(row)[0][1])
+        raw_prob = float(overtake_model.predict_proba(row)[0][1])
     else:
-        prob = float(overtake_model.predict(row)[0])
+        raw_prob = float(overtake_model.predict(row)[0])
+
+    # Apply the isotonic calibrator when available.
+    calibrator = (info or {}).get("_isotonic_calibrator")
+    if calibrator is not None:
+        try:
+            cal_prob = float(calibrator.predict([raw_prob])[0])
+            calibrated = True
+        except Exception:
+            cal_prob = raw_prob
+            calibrated = False
+    else:
+        cal_prob = raw_prob
+        calibrated = False
+
     return {
         "closing_rate_s": round(closing, 4),
-        "overtake_probability": round(prob, 4),
+        "overtake_probability": round(raw_prob, 4),
+        "calibrated_probability": round(cal_prob, 4),
+        "raw_overtake_probability": round(raw_prob, 4),
+        "calibrated": calibrated,
         "energy_clipped": energy_clipped,
         "track_covered": _canonical_track_name(track_name) in covered_tracks(feature_names),
     }
@@ -1808,11 +1879,19 @@ def predict_overtake(gap_before_s, pace_gap_s,
     """Predict one head-to-head lap.
 
     Returns a dict:
-      closing_rate_s       — predicted gap closure this lap (s, +ve = chaser gains)
-      overtake_probability — predicted pass probability (0..1)
-      track_covered        — False when track_name was unseen in training
+      closing_rate_s           — predicted gap closure this lap (s, +ve = chaser gains)
+      overtake_probability     — the RAW classifier score (0..1); the scale every
+                                  decision threshold is tuned on — threshold this
+      calibrated_probability   — isotonic-mapped score (0..1) = the observed pass
+                                  rate for this raw-score band on held-out races;
+                                  equals overtake_probability when no calibrator
+                                  is fitted
+      raw_overtake_probability — the raw score (always identical to
+                                  overtake_probability; kept for API stability)
+      calibrated               — True when the isotonic mapping was applied
+      track_covered            — False when track_name was unseen in training
     """
-    closing_model, overtake_model, feature_names, _info = \
+    closing_model, overtake_model, feature_names, info = \
         load_overtake_models(models_dir=models_dir)
     return _predict_pair_with(
         closing_model, overtake_model, feature_names,
@@ -1822,6 +1901,7 @@ def predict_overtake(gap_before_s, pace_gap_s,
         leader_tyre_compound=leader_tyre_compound,
         fuel_diff_kg=fuel_diff_kg, energy_diff_mj=energy_diff_mj,
         lap_number=lap_number, track_name=track_name, year=year,
+        info=info,
     )
 
 
@@ -2151,7 +2231,7 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     leader_banked_mj = 0.0
     leader_energy_limited_laps = 0
 
-    closing_model, overtake_model, feature_names, _info = \
+    closing_model, overtake_model, feature_names, _overtake_info = \
         load_overtake_models(models_dir=models_dir)
 
     # Aggregate (career) pace models — never a per-year model: the caller's
@@ -2306,6 +2386,7 @@ def simulate_live_call(leader_code, chaser_code, track_name,
                 leader_tyre_compound=l_comp,
                 fuel_diff_kg=0.0, energy_diff_mj=energy_diff,
                 lap_number=L, track_name=track_name, year=year,
+                info=_overtake_info,
             )
             prob = float(res["overtake_probability"])
             energy_clipped = bool(res.get("energy_clipped"))

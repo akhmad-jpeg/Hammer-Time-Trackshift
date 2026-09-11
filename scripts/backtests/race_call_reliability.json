@@ -1,0 +1,165 @@
+{
+ "meta": {
+  "generated_at": "2026-09-11T11:22:45.754327",
+  "script": "scripts/race_call_reliability.py",
+  "reuses": "scripts/backtest_race_calls.py replay machinery",
+  "projection": "overtake_inference.simulate_live_call (the live call)",
+  "scope": {
+   "race_weekends": 84,
+   "pair_segments": 527,
+   "checkpoints": 1717,
+   "year_span": [
+    2020,
+    2026
+   ],
+   "filters": {
+    "year": null,
+    "track": null,
+    "pair": null,
+    "checkpoint_every_laps": 5,
+    "gap_window_s": [
+     0.4,
+     8.0
+    ],
+    "min_segment_laps": 5
+   }
+  },
+  "framing": "We rank attack windows, we don't certify probabilities."
+ },
+ "method": {
+  "conditioning": "a checkpoint is scored when the pair's real clock-gap is inside the battle window; its cumulative P(overtake) comes from the same forward projection the dashboard's Race Call runs; reality is an on-track order swap before either car's next pit stop",
+  "base_pass_rate": 0.0967,
+  "base_pass_rate_meaning": "how often a real pass followed an arbitrary in-battle checkpoint \u2014 the null the confidence lift is measured against"
+ },
+ "threshold_table": [
+  {
+   "threshold": 0.3,
+   "checkpoints": 526,
+   "actual_passes": 95,
+   "pass_rate": 0.1806,
+   "lift_vs_base": 1.87,
+   "thin": false
+  },
+  {
+   "threshold": 0.4,
+   "checkpoints": 512,
+   "actual_passes": 92,
+   "pass_rate": 0.1797,
+   "lift_vs_base": 1.86,
+   "thin": false
+  },
+  {
+   "threshold": 0.5,
+   "checkpoints": 503,
+   "actual_passes": 90,
+   "pass_rate": 0.1789,
+   "lift_vs_base": 1.85,
+   "thin": false
+  },
+  {
+   "threshold": 0.6,
+   "checkpoints": 491,
+   "actual_passes": 88,
+   "pass_rate": 0.1792,
+   "lift_vs_base": 1.85,
+   "thin": false
+  },
+  {
+   "threshold": 0.7,
+   "checkpoints": 484,
+   "actual_passes": 87,
+   "pass_rate": 0.1798,
+   "lift_vs_base": 1.86,
+   "thin": false
+  },
+  {
+   "threshold": 0.8,
+   "checkpoints": 472,
+   "actual_passes": 86,
+   "pass_rate": 0.1822,
+   "lift_vs_base": 1.88,
+   "thin": false
+  },
+  {
+   "threshold": 0.9,
+   "checkpoints": 287,
+   "actual_passes": 54,
+   "pass_rate": 0.1882,
+   "lift_vs_base": 1.95,
+   "thin": false
+  },
+  {
+   "threshold": 0.95,
+   "checkpoints": 161,
+   "actual_passes": 33,
+   "pass_rate": 0.205,
+   "lift_vs_base": 2.12,
+   "thin": false
+  }
+ ],
+ "calibration_bins": [
+  {
+   "bin": "[0.0,0.2)",
+   "checkpoints": 1172,
+   "actual_passes": 68,
+   "pass_rate": 0.058,
+   "thin": false
+  },
+  {
+   "bin": "[0.2,0.5)",
+   "checkpoints": 42,
+   "actual_passes": 8,
+   "pass_rate": 0.1905,
+   "thin": false
+  },
+  {
+   "bin": "[0.5,0.8)",
+   "checkpoints": 31,
+   "actual_passes": 4,
+   "pass_rate": 0.129,
+   "thin": false
+  },
+  {
+   "bin": "[0.8,1.0)",
+   "checkpoints": 472,
+   "actual_passes": 86,
+   "pass_rate": 0.1822,
+   "thin": false
+  }
+ ],
+ "window_detection": {
+  "tp": 240,
+  "fp": 394,
+  "fn": 132,
+  "tn": 951,
+  "precision": 0.3785,
+  "recall": 0.6452
+ },
+ "pass_detection_at_default_threshold": {
+  "tp": 86,
+  "fp": 386,
+  "fn": 80,
+  "tn": 1165,
+  "precision": 0.1822,
+  "recall": 0.5181
+ },
+ "gap_walk": {
+  "mean_mae_s_per_lap": 5.313,
+  "mean_bias_s_per_lap": -0.402,
+  "checkpoints": 1698
+ },
+ "headline": {
+  "pass_rate_at_default_0_8": 0.1822,
+  "checkpoints_at_0_8": 472,
+  "pass_rate_at_0_5": 0.1789,
+  "checkpoints_at_0_5": 503,
+  "default_threshold_source": "overtake_inference.LIVE_PASS_CUM"
+ },
+ "caveats": [
+  "A checkpoint's scoring window ends at the next pit stop by either driver; undercut/overcut outcomes are out of scope.",
+  "Safety-car compression inside a window counts as convergence.",
+  "Gaps are cumulative-race-clock gaps (training semantics), not timing-feed track gaps.",
+  "Buckets flagged thin have fewer than 15 scored checkpoints.",
+  "The overtake classifier's positive labels are few; these rates are the honest operating evidence, not a certification."
+ ]
+}
