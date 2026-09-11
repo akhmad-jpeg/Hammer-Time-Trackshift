@@ -796,7 +796,7 @@
         .tbl-row.po-loser > span:last-child { font-style:italic; }
         body.light-mode .tbl-row.po-winner { background:linear-gradient(90deg, rgba(255,215,0,0.18), rgba(255,215,0,0.03) 65%, transparent); }
 
-/* ── Tactical Options: leader posture toggle ─────────────────────────── */
+/* ── Tactical Call: seat + leader posture toggles ────────────────────── */
 .po-posture {
     display: flex;
     gap: 0;

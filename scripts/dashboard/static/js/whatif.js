@@ -64,6 +64,12 @@ function htUpdateContext() {
     const bi = document.getElementById('bt-inherited');
     if (bi) bi.textContent = (L || '—') + ' vs ' + (C || '—') + ' · ' + (T || '—') + ' ' + (Y || '—') +
         ' · LAP ' + lap + ' · GAP ' + (gap || '—') + 's · ' + (lt || '—') + ' ' + (la || '?') + 'L vs ' + (ct || '—') + ' ' + (ca || '?') + 'L';
+    // Programmatic scenario fills (live sync, calendar round click, preset
+    // gap setter) all end here — schedule the merged call's auto-refresh so
+    // a rendered card can never outlive its state.  ucScheduleAuto is
+    // defined in policies.js, which loads after this file (function
+    // declarations hoist globally, so the late-defined name resolves).
+    if (typeof ucScheduleAuto === 'function') ucScheduleAuto();
 }
 
 function htEditScenario(btn) {
@@ -714,82 +720,6 @@ function setOvErsShape(d1, d2, d3) {
         if (el) el.value = pair[1];
     });
     ovSectorInput();
-}
-
-async function runRaceCall() {
-    const err = document.getElementById('ov-err');
-    if (err) err.style.display = 'none';
-    const out = document.getElementById('ov-call');
-    const btn = document.getElementById('call-btn');
-    const leader = document.getElementById('ov-leader').value;
-    const chaser = document.getElementById('ov-chaser').value;
-    const track = document.getElementById('ov-track').value;
-    if (!leader || !chaser || !track) {
-        if (err) {
-            err.textContent = 'Pick the leader, chaser and race first — fastest: Calendar tab → click the round.';
-            err.style.display = 'block';
-        }
-        return;
-    }
-    const battMjRaw = document.getElementById('ov-ers-batt').value;
-    const battPct = battMjRaw === ''
-        ? null
-        : Math.max(30, Math.min(100, 100 * parseFloat(battMjRaw) / 4.0));
-    const base = {
-        leader_code: leader,
-        chaser_code: chaser,
-        track_name: track,
-        year: parseInt(document.getElementById('ov-year').value, 10) || null,
-        start_lap: parseInt(document.getElementById('ov-lap').value, 10) || 1,
-        race_length: parseInt(document.getElementById('ov-racelaps').value, 10) || 57,
-        gap_before_s: parseFloat(document.getElementById('ov-gap').value) || 0.8,
-        leader_tyre_compound: document.getElementById('ov-ltyre').value,
-        chaser_tyre_compound: document.getElementById('ov-ctyre').value,
-        leader_tyre_age: parseInt(document.getElementById('ov-lage').value, 10) || 0,
-        chaser_tyre_age: parseInt(document.getElementById('ov-cage').value, 10) || 0,
-    };
-    if (battPct != null) base.chaser_battery_pct = battPct;
-    // The compared settings: the three preset vectors (Balanced / Push /
-    // Lift & Coast) plus the slider's current sector shape when it differs
-    // from every preset.
-    const customDeltas = ovSectorDeltas();
-    const scenarios = PRESET_SCENARIOS.map(p => ({
-        key: p.key, label: p.label, color: p.color, deltas: p.deltas.slice(),
-        custom: false
-    }));
-    const dup = PRESET_SCENARIOS.find(p =>
-        p.deltas.every((d, i) => Math.abs(d - customDeltas[i]) < 1e-9));
-    if (!dup) {
-        const net = customDeltas.reduce((a, b) => a + b, 0);
-        scenarios.push({
-            key: 'custom', custom: true,
-            label: Math.abs(net) < 0.005 ? 'Balanced'
-                 : (net > 0 ? 'Push' : 'Lift & Coast'),
-            color: net >= 0 ? '#ff6b6b' : '#4fc3f7',
-            deltas: customDeltas
-        });
-    }
-
-    if (btn) { btn.disabled = true; btn.textContent = 'MODELLING ' + scenarios.length + ' SETTINGS…'; }
-    if (out) out.innerHTML =
-        `<div class="chart-note">Running the race forward from L${base.start_lap} of ${base.race_length} under <b>Lift &amp; Coast / Balanced / Push</b>${scenarios.some(s => s.custom) ? ' + your sector shape' : ''} — leader assumed Balanced, tyre ages ticking up, no pit-stop / SC model…</div>`;
-    try {
-        const results = await Promise.all(scenarios.map(async sc => {
-            const res = await fetch('/api/overtake/live', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(Object.assign({}, base, { chaser_ers_deltas: sc.deltas }))
-            });
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-            return { scenario: sc, live: data.live };
-        }));
-        lastLiveCompare = results;
-        renderLiveCompare(results);
-    } catch (e) {
-        if (err) { err.textContent = 'Race call error: ' + e.message; err.style.display = 'block'; }
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = "▲ WHAT'S THE CALL?"; }
-    }
 }
 
 function livePct(p) { return Math.round(100 * Math.min(1, Math.max(0, p || 0))); }

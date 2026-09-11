@@ -31,7 +31,6 @@
         <button class="f1-nav-btn" onclick="switchTab('predict',this)">Lap Predictor</button>
         <button class="f1-nav-btn" onclick="switchTab('strategy',this)">Strategy Advisor</button>
         <button class="f1-nav-btn" onclick="switchTab('whatif',this)">Hammer Time</button>
-        <button class="f1-nav-btn" onclick="switchTab('policies',this)">Tactical Options</button>
         <button class="f1-nav-btn" onclick="switchTab('drivers',this)">Drivers</button>
     </nav>
 
@@ -380,14 +379,25 @@
         </div>
     </div>
 
-    <!-- HERO · RACE CALL — the decision (always open) -->
-    <div class="ht-mod open" id="ht-racecall">
+    <!-- THE CALL — ONE merged decision.  The race projection and the
+         multi-policy tactical engine are the same call now: both seats are
+         evaluated, the leader engine's recommended defence conditions the
+         posture the attack policies are scored against, and the seat switch
+         only chooses whose call is surfaced. -->
+    <div class="ht-mod open" id="ht-call">
         <div class="ht-hero">
-            <div class="ht-hero-kicker">RACE CALL</div>
+            <div class="ht-hero-kicker">THE CALL</div>
             <div class="ht-hero-title">WHAT'S THE CALL?</div>
-            <div class="ht-hero-line" id="ht-hero-line">Set the scenario and the race state, then make the call.</div>
+            <div class="ht-hero-line" id="ht-hero-line">Pick the two drivers, set the race state, choose whose radio you are on, then make the call.</div>
         </div>
         <div class="ht-body" style="border-top:0;padding-top:0">
+            <div class="field" style="margin:0 0 14px">
+                <label>Seat — whose call is this? Both engines always run; the seat picks which one you see (and whose battery the energy fields describe).</label>
+                <div class="po-posture" id="uc-persp">
+                    <button type="button" class="po-persp-btn active" data-perspective="chaser" onclick="ucSetPerspective(this)">CHASER — WE ATTACK</button>
+                    <button type="button" class="po-persp-btn" data-perspective="leader" onclick="ucSetPerspective(this)">LEADER — WE DEFEND</button>
+                </div>
+            </div>
             <div class="ht-state-grid">
                 <div class="ht-state-grp">
                     <div class="grp-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">CURRENT RACE STATE
@@ -432,33 +442,28 @@
                     </div>
                 </div>
                 <div class="ht-state-grp">
-                    <div class="grp-label">CHASER ENERGY SHAPE (LEADER ASSUMED BALANCED)</div>
-                    <div class="ht-presets" style="margin:0 0 8px">
-                        <button type="button" class="ht-preset" onclick="setOvErsShape(-0.05,-0.05,-0.05)">Lift &amp; Coast −</button>
-                        <button type="button" class="ht-preset" onclick="setOvErsShape(0,0,0)">Balanced</button>
-                        <button type="button" class="ht-preset" onclick="setOvErsShape(0.05,0.05,0.05)">Push +</button>
-                    </div>
-                    <div class="sb-sliders">
-                        <div class="sb-row"><label>S1</label><input type="range" id="ov-d1" min="-2" max="2" step="0.05" value="0" oninput="ovSectorInput()"><span class="sb-val" id="ov-v1">+0.00</span></div>
-                        <div class="sb-row"><label>S2</label><input type="range" id="ov-d2" min="-2" max="2" step="0.05" value="0" oninput="ovSectorInput()"><span class="sb-val" id="ov-v2">+0.00</span></div>
-                        <div class="sb-row"><label>S3</label><input type="range" id="ov-d3" min="-2" max="2" step="0.05" value="0" oninput="ovSectorInput()"><span class="sb-val" id="ov-v3">+0.00</span></div>
-                    </div>
-                    <div class="sb-sum" id="ov-sum">Σ Δ = +0.00 MJ/lap · net deploy/bank — zero-sum shapes stay store-neutral and only reshape pace; drawn from the 4.0 MJ store (30% floor)</div>
-                    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:0.72em;color:#99a">
-                        <label for="ov-ers-batt" style="margin:0;flex-shrink:0;color:#9aa">Battery Now (MJ)</label>
+                    <div class="grp-label">ENERGY &amp; RESERVE</div>
+                    <div class="field" style="margin:0 0 12px">
+                        <label for="ov-ers-batt" id="uc-batt-label">Our battery now (MJ of the 4.0 MJ store)</label>
                         <input type="number" id="ov-ers-batt" min="0" max="4" step="0.1" value="" placeholder="blank = ~62% band"
-                               style="width:84px;background:#1b1b22;border:1px solid #ffffff26;border-radius:6px;color:#eee;padding:4px 8px;font-family:'Share Tech Mono',monospace"
-                               title="Chaser battery right now, in MJ of the 4.0 MJ store — blank uses the mid-race working band (~62%). Deploy draws it down to the 30% floor; bank tops out at a full store.">
-                        <span style="color:#667">MJ of 4.0 — blank = auto</span>
+                               title="The battery of the car whose seat is selected, in MJ of the 4.0 MJ store — blank uses the mid-race working band (~62%). Deploy draws it down to the 30% floor; bank tops out at a full store.">
+                    </div>
+                    <div class="field" style="margin:0 0 12px">
+                        <label>Reserve target (% of store — policies below it are rejected)</label>
+                        <input type="number" id="uc-reserve" min="10" max="100" step="5" value="40">
+                    </div>
+                    <div class="field" id="uc-threat-wrap" style="margin:0;display:none">
+                        <label>Threat battery (MJ — the attacking car, leader seat only)</label>
+                        <input type="number" id="uc-threat-batt" min="0" max="4" step="0.1" placeholder="blank = ~62% band">
                     </div>
                 </div>
             </div>
-            <button class="action-btn" id="call-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px;margin-top:6px" onclick="runRaceCall()">▲ WHAT'S THE CALL?</button>
-            <div class="err-box" id="ov-err"></div>
-            <div id="ov-call"><div class="chart-note">Set the live battle state and make the call — the deck projects the rest of this race from the two cars' career pace models. A round on the Calendar tab preloads the pair + circuit + season.</div></div>
+            <button class="action-btn" id="uc-run-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px;margin-top:6px" onclick="runUnifiedCall()">⚡ MAKE THE CALL</button>
+            <div class="err-box" id="uc-err" style="display:none"></div>
+            <div id="uc-out"><div class="chart-note">One call from <b>both</b> engines: the race projection and the five-policy tactical engine are merged. Both seats are evaluated — the leader engine names the defence it would run, and that defence sets the posture the attack policies are scored against — so the call cannot recommend an attack the opponent's own engine would shut down. The seat switch only chooses whose call is surfaced. All ten policies (both seats) stay listed below the call.</div></div>
             <details class="ht-hint" style="margin-top:14px">
-                <summary>ⓘ What the call does</summary>
-                <p>Projects THIS race forward from the current lap — no replay of a finished race. Each driver's career (aggregate) pace model predicts their lap time on the current circuit / tyre context; tyre ages tick up one lap at a time and the gap moves by the modeled pace edge. Once the chaser is within ~1.2&nbsp;s the per-lap overtake probability is accumulated, and the call is the lap the cumulative chance crosses 50%. The <b>chaser ERS sector sliders</b> (S1/S2/S3, exactly the Energy Sandbox's vocabulary) shape the chaser's deployment per lap: each sector's delta is worth that sector's measured s/MJ, so a zero-sum shape can buy time by reallocating to the fast sectors without touching the battery; a positive net draws the 4.0&nbsp;MJ store down to the 30% floor (faster), a negative net banks it (slower). Battery Now defaults to the mid-race working band (~62%) when left blank. The leader is assumed Balanced — a wall only controls its own car. No pit-stop or Safety-Car model — tyres run to the flag, so re-run after stops for the live picture.</p>
+                <summary>ⓘ How the merged call decides</summary>
+                <p>One call from <b>both</b> engines. The <b>race projection</b> walks THIS race forward from the current lap — no replay of a finished race: each driver's career (aggregate) pace model predicts their lap time on the current circuit / tyre context, tyre ages tick up one lap at a time, and the gap moves by the modelled pace edge. Once the chaser is within ~1.2&nbsp;s the per-lap overtake probability is accumulated. The <b>decision engine</b> then rolls five tactical policies (GREEDY ATTACK / BALANCED HOLD / TACTICAL STALK / SAVE &amp; DEFEND / UNDERCUT PREP) through that same simulator and scores them — P(pass) × 6.0&nbsp;s − 2.0&nbsp;s/MJ below reserve − tyre wear − P(fail) × 4.0&nbsp;s − 0.1&nbsp;s/lap deferral. <b>Both seats always run:</b> the leader engine names the defence it would choose, and that choice sets the posture the chaser engine's attack policies are scored against, so the call must beat the opponent's own recommended answer rather than a hand-set toggle. The seat only decides whose call is surfaced as THE CALL. Any policy (either seat) whose store dips below the reserve target or drains to the 30% floor is <b>INFEASIBLE</b>: pruned, never recommended, listed with its reason. Deterministic — the same state always yields the same call — and the payload reports its own latency. No pit-stop or Safety-Car model: tyres run to the flag, so re-run after stops. Manual per-sector ERS shaping lives in the Energy Lab module below.</p>
             </details>
         </div>
     </div>
@@ -720,81 +725,6 @@
                     <div class="chart-note">Loading fleet summary…</div>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- TAB: TACTICAL OPTIONS — the multi-policy decision engine (ACTION card) -->
-<div id="tab-policies" class="tab-panel">
-    <!-- CONTEXT BAR — inherits the Hammer Time scenario (single source of truth) -->
-    <div class="ctx-bar" id="po-ctxbar">
-        <div class="ctx-main">
-            <span class="ctx-battle" id="po-battle">— → —</span>
-            <span class="ctx-meta" id="po-meta">INHERITS THE HAMMER TIME SCENARIO</span>
-        </div>
-        <div class="ctx-chips">
-            <span class="ctx-chip" id="po-gap">GAP —</span>
-            <span class="ctx-chip" id="po-batt">BATT AUTO (~62%)</span>
-            <span class="ctx-chip" id="po-posture-chip">LEADER: PASSIVE</span>
-        </div>
-        <div class="ctx-actions">
-            <button type="button" class="ctx-edit" onclick="switchTabTo('whatif')">EDIT SCENARIO</button>
-        </div>
-    </div>
-
-    <!-- HERO · THE ACTION CARD -->
-    <div class="ht-mod open" id="po-action">
-        <div class="ht-hero">
-            <div class="ht-hero-kicker">DECISION ENGINE</div>
-            <div class="ht-hero-title">WHICH TACTICAL CALL?</div>
-            <div class="ht-hero-line" id="po-hero-line">Pick a seat — attacking chaser or defending leader — then let five competing policies fight it out over the same race state.</div>
-        </div>
-        <div class="ht-body" style="border-top:0;padding-top:0">
-            <div class="field" style="margin:14px 0 0">
-                <label>Perspective — which seat are we advising?</label>
-                <div class="po-posture" id="po-persp">
-                    <button type="button" class="po-persp-btn active" data-perspective="chaser" onclick="poSetPerspective(this)">CHASER — WE ATTACK</button>
-                    <button type="button" class="po-persp-btn" data-perspective="leader" onclick="poSetPerspective(this)">LEADER — WE DEFEND</button>
-                </div>
-            </div>
-            <div class="two-col ht-cols" style="gap:12px;margin-top:14px">
-                <div class="field" style="margin:0">
-                    <label id="po-batt-label">Chaser battery now (% — blank = ~62% band)</label>
-                    <input type="number" id="po-batt-in" min="0" max="100" step="1" placeholder="blank = auto">
-                </div>
-                <div class="field" style="margin:0">
-                    <label>Reserve target (% of store — policies below it are rejected)</label>
-                    <input type="number" id="po-reserve" min="10" max="100" step="5" value="40">
-                </div>
-            </div>
-            <div id="po-leader-extras" style="display:none">
-                <div class="two-col ht-cols" style="gap:12px;margin-top:12px">
-                    <div class="field" style="margin:0">
-                        <label>Threat: attacking chaser's battery (% — blank = ~62%)</label>
-                        <input type="number" id="po-threat-batt" min="0" max="100" step="1" placeholder="blank = ~62%">
-                    </div>
-                    <div class="field" style="margin:0">
-                        <label>Threat model (disclosed): chaser attacks at a fixed 75% lever</label>
-                        <div class="chart-note" style="margin:0;padding:8px 10px">From this seat the engine scores DEFENCES: how long does the position hold, and what does holding it cost?</div>
-                    </div>
-                </div>
-            </div>
-            <div id="po-chaser-extras" style="margin-top:10px">
-                <div class="field" style="margin:10px 0 0">
-                    <label>Leader posture — the game-theoretic lever (does the leader fight back?)</label>
-                    <div class="po-posture" id="po-posture">
-                        <button type="button" class="po-posture-btn active" data-posture="balanced" onclick="poSetPosture(this)">PASSIVE</button>
-                        <button type="button" class="po-posture-btn" data-posture="defensive_boost" onclick="poSetPosture(this)">DEFENSIVE BOOST</button>
-                    </div>
-                </div>
-            </div>
-            <button class="action-btn" id="po-run-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px;margin-top:6px" onclick="runPolicyEngine()">⚡ EVALUATE FIVE POLICIES</button>
-            <div class="err-box" id="po-err" style="display:none"></div>
-            <div id="po-out"><div class="chart-note">The engine rolls GREEDY ATTACK / BALANCED HOLD / TACTICAL STALK / SAVE &amp; DEFEND / UNDERCUT PREP through the same simulator as the live race call, scores them with a transparent cost function, and rejects any policy that breaches the battery reserve. The winner becomes the ACTION card; the losers stay visible with the reason each one lost.</div></div>
-            <details class="ht-hint" style="margin-top:14px">
-                <summary>ⓘ How the engine decides</summary>
-                <p>Pick a seat. <b>CHASER</b>: each policy is an attack plan rolled through the race-call simulator; score = P(pass) × 6.0&nbsp;s − 2.0&nbsp;s/MJ below reserve − tyre wear − P(fail) × 4.0&nbsp;s − 0.1&nbsp;s/lap deferral. <b>LEADER</b>: the chaser is modelled as attacking at a fixed 75% lever, and each policy is a defence; score = position risk (6.0&nbsp;s if the attack lands, residual threat otherwise) + battery + wear − <b>0.2&nbsp;s per lap the defence holds</b>. Any policy — attack or defence — whose store dips below the reserve target or drains to the 30% floor is <b>INFEASIBLE</b>: pruned, never recommended, shown greyed-out with its reason. Confidence scales with the score margin over the runner-up, degraded by the battery uncertainty band. Deterministic: the same state always yields the same call.</p>
-            </details>
         </div>
     </div>
 </div>

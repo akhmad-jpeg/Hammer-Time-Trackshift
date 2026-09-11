@@ -67,6 +67,7 @@ Run standalone:
 
 from __future__ import annotations
 
+import copy
 import sys
 import time
 from pathlib import Path
@@ -134,6 +135,71 @@ CONFIDENCE_SPAN_S = 1.5    # margin (s) at which confidence saturates
 # latency_ms, so the UI can never claim faster than delivered.  Re-measure
 # on presentation hardware before quoting a number on stage.
 LATENCY_BUDGET_MS = 1500.0
+
+# ---------------------------------------------------------------------------
+# Engine cache for the unified call.
+#
+# evaluate_call runs BOTH engines; a repeated Evaluate press on the same
+# race state (and the seat flip at default batteries — the leader engine
+# maps a None battery onto ERS_DEFAULT_START_PCT, so (None, 62.5) and
+# (62.5, None) are the same computation) would otherwise re-simulate every
+# walk.  Each engine's evaluation is therefore memoised against its full
+# input tuple and handed out as a deep copy: an identical call reuses the
+# leader-engine walk set instead of re-simulating it.  Within one call the
+# two engines share no walks by construction (the leader engine models the
+# attacking threat via chaser_ers + an explicit leader battery; the chaser
+# engine levers the chaser against the coupled posture), so the cache unit
+# is the engine, not the walk.  The payload discloses which engines were
+# reused (see evaluate_call's engine_cache) — a cached latency is never
+# presented as a fresh walk time.  Eviction is bounded FIFO (insertion
+# order) rather than LRU on purpose: the touch would need a pop-after-get
+# that races under concurrent Flask requests, and FIFO is exactly right
+# for the demo pattern (a handful of recent states).  Concurrent requests
+# may compute the same engine twice — the cache is a best-effort memo,
+# never a correctness dependency.
+# ---------------------------------------------------------------------------
+CALL_ENGINE_CACHE_MAX = 8        # most recent engine evaluations per process
+_CALL_ENGINE_CACHE: dict[tuple, dict] = {}
+
+
+def _engine_cache_key(engine: str, *, posture=None, **kw) -> tuple:
+    """Full input tuple for one engine's evaluation.
+
+    Battery slots are normalised exactly as the engines normalise them
+    (None -> ERS_DEFAULT_START_PCT), so a seat flip at default batteries
+    is a cache hit rather than a recomputation of an identical state.
+    """
+
+    def _batt(v):
+        return ERS_DEFAULT_START_PCT if v is None else float(v)
+
+    return (
+        engine,
+        str(kw["leader_code"]).upper(), str(kw["chaser_code"]).upper(),
+        str(kw["track_name"]),
+        int(kw["start_lap"]), int(kw["race_length"]),
+        round(float(kw["gap_before_s"]), 4),
+        str(kw["leader_tyre_compound"]), str(kw["chaser_tyre_compound"]),
+        float(kw["leader_tyre_age"]), float(kw["chaser_tyre_age"]),
+        kw["year"],
+        _batt(kw["leader_batt"]) if engine == "leader" else None,
+        _batt(kw["chaser_batt"]),
+        float(kw["reserve"]),
+        posture if engine == "chaser" else None,
+    )
+
+
+def _engine_cache_get(key: tuple):
+    hit = _CALL_ENGINE_CACHE.get(key)
+    if hit is None:
+        return None
+    return copy.deepcopy(hit)
+
+
+def _engine_cache_put(key: tuple, payload: dict) -> None:
+    _CALL_ENGINE_CACHE[key] = copy.deepcopy(payload)
+    while len(_CALL_ENGINE_CACHE) > CALL_ENGINE_CACHE_MAX:
+        _CALL_ENGINE_CACHE.pop(next(iter(_CALL_ENGINE_CACHE)))
 
 
 # ---------------------------------------------------------------------------
@@ -222,12 +288,19 @@ def _run_phase(leader_code, chaser_code, track_name, start_lap, race_length,
 
 
 def _phase2_gap(sim1, phase1_laps):
-    """Gap (s) the phase-1 walk leaves the pair at, for phase 2 to inherit.
+    """State the phase-1 walk leaves the pair at, for phase 2 to inherit.
 
-    simulate_live_call already walks to race_length; for the stalk policy we
-    re-run from the deploy lap with the gap its phase-1 projection reached
-    at that lap (and tyre ages ticked accordingly), so phase 2 starts where
-    phase 1 genuinely ended rather than from a hand-waved state.
+    simulate_live_call already walks to race_length; for two-phase policies
+    (the chaser's TACTICAL STALK and the leader's BANK & STRIKE) phase 2 is
+    re-run from the deploy lap with the gap the phase-1 projection reached
+    at that lap and BOTH cars' tyre ages ticked from their OWN starting
+    ages, so phase 2 starts where phase 1 genuinely ended rather than from
+    a hand-waved state.
+
+    Returns (gap_before_s, chaser_age, leader_age).  The leader's age is
+    returned separately: the old implementation ticked only the chaser's
+    age and stamped it onto both cars, so the leader ran phase 2 on the
+    wrong tyre age whenever the two stints started at different laps.
     """
     laps = sim1.get("laps") or []
     row = None
@@ -237,11 +310,14 @@ def _phase2_gap(sim1, phase1_laps):
     if row is None:
         row = laps[0] if laps else None
     if row is None:
-        return None, None
-    # Age tick: phase 2 starts one lap after phase 1's last walked lap.
-    age0 = sim1["meta"]["tyres"]["chaser"]["age"]
-    ticked = int(age0 + (row["lap"] - sim1["meta"]["start_lap"]) + 1)
-    return max(0.05, float(row["gap_before_s"])), ticked
+        return None, None, None
+    # Age tick: phase 2 starts one lap after phase 1's last walked lap, and
+    # each car ticks from its own phase-1 age.
+    meta = sim1["meta"]
+    laps_run = (row["lap"] - meta["start_lap"]) + 1
+    c_age2 = int(meta["tyres"]["chaser"]["age"] + laps_run)
+    l_age2 = int(meta["tyres"]["leader"]["age"] + laps_run)
+    return max(0.05, float(row["gap_before_s"])), c_age2, l_age2
 
 
 def _battery_pct(mj: float) -> float:
@@ -306,6 +382,8 @@ def evaluate_tactical_policies(
             deployed = summ.get("ers_deployed_mj", 0.0)
             banked = summ.get("ers_banked_mj", 0.0)
             energy_limited = summ.get("ers_energy_limited_laps", 0)
+            wear_delta = _est_extra_wear(net1, len(sim.get("laps") or []),
+                                         chaser_tyre_compound)
             ms_total = ms
         else:
             # Two-phase policy: bank until the deploy lap, then strike.
@@ -313,21 +391,33 @@ def evaluate_tactical_policies(
             sim1, ms1 = _run_phase(leader_code, chaser_code, track_name,
                                    start_lap, deploy_lap, gap_before_s,
                                    tyres, year, batt_pct, net1, leader_posture)
-            gap2, age2 = _phase2_gap(sim1, phase1_laps)
+            gap2, c_age2, l_age2 = _phase2_gap(sim1, phase1_laps)
             # Battery carried into phase 2 = the phase-1 end SOC.
             soc1 = sim1.get("summary", {}).get("chaser_soc_end_pct")
             if soc1 is not None:
                 batt_start_phase2_pct = soc1
+            # Each car's tyre age ticks from its OWN phase-1 age.
             tyres2 = {
                 "leader": {"compound": leader_tyre_compound,
-                           "age": age2 or leader_tyre_age + 1},
+                           "age": (l_age2 if l_age2 is not None
+                                   else leader_tyre_age + 1)},
                 "chaser": {"compound": chaser_tyre_compound,
-                           "age": age2 or chaser_tyre_age + 1},
+                           "age": (c_age2 if c_age2 is not None
+                                   else chaser_tyre_age + 1)},
             }
             sim2, ms2 = _run_phase(leader_code, chaser_code, track_name,
                                    deploy_lap + 1, race_length, gap2,
                                    tyres2, year, batt_start_phase2_pct, net2,
                                    leader_posture)
+            # Wear is priced per phase: the banking phase burns nothing
+            # (net <= 0), the strike pays at full lever on the chaser's
+            # compound — the old code priced phase-1's lever only, so
+            # two-phase strikes rode free.
+            wear_delta = (
+                _est_extra_wear(net1, len(sim1.get("laps") or []),
+                                chaser_tyre_compound)
+                + _est_extra_wear(net2, len(sim2.get("laps") or []),
+                                  chaser_tyre_compound))
             call, summ = sim2["call"], sim2["summary"]
             soc_end_pct = summ.get("chaser_soc_end_pct")
             soc1_rows = [l.get("chaser_soc_pct") for l in sim1["laps"]
@@ -374,16 +464,16 @@ def evaluate_tactical_policies(
         # except the pass reward, which enters negatively as a gain).
         pass_gain = cum * PASS_VALUE_S
 
-        # Tyre cost: extra health burned vs the Balanced baseline for the
-        # laps the policy spends on a positive lever.
-        active_push_laps = len(sim.get("laps") or []) \
-            if pol["deploy_offset"] == 0 else len(sim1.get("laps") or [])
-        wear_delta = max(0.0, _est_extra_wear(net1, active_push_laps))
-        wear_cost = LAMBDA_WEAR * wear_delta
+        # Tyre cost: extra health burned vs the Balanced baseline, priced
+        # per phase in the branch above (on the CHASER's compound).
+        wear_cost = LAMBDA_WEAR * max(0.0, wear_delta)
+        # Cliff risk applies to whichever phase carries the positive lever
+        # (see _push_lever): a two-phase strike that only converts by
+        # draining the store used to escape the cliff penalty entirely.
+        push_lever = _push_lever(pol)
         cliff_cost = CLIFF_RISK_S * (
             1.0 if (min_soc_pct is not None and drained
-                    and pol["deploy_offset"] == 0
-                    and pol["phase1_mj"] > 0) else 0.0)
+                    and push_lever > 0) else 0.0)
 
         fail_prob = max(0.0, 1.0 - cum) if pass_lap else 0.0
         risk_cost = LAMBDA_RISK * fail_prob * DIRTY_AIR_PENALTY_S
@@ -394,7 +484,7 @@ def evaluate_tactical_policies(
         # Hard constraint: reserve breach or a pass that only converts by
         # draining the store to its floor can never be recommended.
         infeasible = reserve_breach or (pass_lap and drained
-                                        and net1 > 0)
+                                        and push_lever > 0)
         score = (batt_cost + wear_cost + cliff_cost + risk_cost
                  + latency_cost) - (0.0 if infeasible else pass_gain)
 
@@ -433,7 +523,7 @@ def evaluate_tactical_policies(
                 f"{_battery_pct(reserve):.0f}% management target"
                 if reserve_breach else
                 ("pass converts only by draining the store to its floor"
-                 if (pass_lap and drained and net1 > 0) else None)),
+                 if (pass_lap and drained and push_lever > 0) else None)),
             "phase_laps_ms": round(ms_total, 1),
         })
 
@@ -528,20 +618,36 @@ def evaluate_tactical_policies(
     }
 
 
-def _est_extra_wear(net_mj: float, laps: int) -> float:
+def _push_lever(pol: dict) -> float:
+    """The lever of the phase that actually PUSHES (positive net MJ/lap).
+
+    Single-phase policies push with phase 1; two-phase (bank-then-strike)
+    policies push with phase 2 — their phase-1 lever is negative (banking).
+    The cliff-risk penalty and the floor-drain infeasibility must key off
+    THIS lever: the old code tested phase 1 for both, which exempted every
+    two-phase policy from the cliff penalty and the drain rule.
+    """
+    if pol["deploy_offset"] == 0:
+        return pol["phase1_mj"]
+    return pol["phase2_mj"]
+
+
+def _est_extra_wear(net_mj: float, laps: int, compound: str = "Medium") -> float:
     """Extra tyre health-% burned by a positive lever vs Balanced.
 
     Pushing spends deploy MJ that Balanced would bank; the tyre cost is
     modelled from the wear meter itself: full lever ≈ double the Balanced
-    heat load on those laps.  Health-% per lap at full lever ≈ the compound
-    loss rate (via tyre_health's linear model) — reused here so the engine
-    does not invent a second wear model.
+    heat load on those laps.  Health-% per lap at full lever ≈ the
+    COMPOUND's loss rate (via tyre_health's linear model) — reused here so
+    the engine does not invent a second wear model.  The compound matters:
+    the old hard-coded Medium priced a Soft-tyre attack at Medium's heat
+    load (Soft wears ~2.5x faster).
     """
     if net_mj <= 0 or laps <= 0:
         return 0.0
     from tyre_degradation import tyre_health
-    h0 = tyre_health("Medium", 0)
-    h1 = tyre_health("Medium", 1)
+    h0 = tyre_health(compound, 0)
+    h1 = tyre_health(compound, 1)
     per_lap_pct = max(0.0, float(h0) - float(h1))          # ≈ balanced heat
     lever_frac = min(1.0, net_mj / ERS_MAX_MJ_LAP)
     return per_lap_pct * lever_frac * laps                  # extra % burned
@@ -668,6 +774,24 @@ def _leader_walk(leader_code, chaser_code, track_name, start_lap, race_length,
     return sim, (time.perf_counter() - t0) * 1000.0
 
 
+def _leader_push_lever(pol: dict) -> float:
+    """Leader-side twin of _push_lever: the lever of the phase that PUSHES.
+
+    Single-phase leader policies push with their lever (COUNTER-DEPLOY);
+    REACTIVE DEFENSE pushes via the posture preset (scored with lever 0.0
+    here, so a drained reactive defence escapes the cliff penalty by
+    construction, not by accident — its drain shows up as infeasibility,
+    which is the honest signal).  Two-phase BANK & STRIKE pushes with its
+    strike_lever; banking rows never push.  Without this keying, a drained
+    two-phase counter-strike paid no cliff risk at all.
+    """
+    if pol.get("preset") is not None:
+        return 0.0            # preset-driven: drain => infeasible, not cliff
+    if pol["deploy_offset"] == 0:
+        return pol.get("lever") or 0.0
+    return pol.get("strike_lever") or 0.0
+
+
 def evaluate_leader_policies(
         leader_code: str, chaser_code: str, track_name: str,
         start_lap: int, race_length: int, gap_before_s: float,
@@ -718,6 +842,9 @@ def evaluate_leader_policies(
                 if preset is None else 0.0,
                 preset=preset)
             summ = sim["summary"]
+            wear_delta = _est_extra_wear(
+                lever if preset is None else 0.0,
+                len(sim.get("laps") or []), leader_tyre_compound)
             ms_total = ms
         else:
             # Two-phase: concede + refill until the deploy lap, then
@@ -725,19 +852,30 @@ def evaluate_leader_policies(
             sim1, ms1 = _leader_walk(
                 leader_code, chaser_code, track_name, start_lap, deploy_lap,
                 gap_before_s, tyres, year, cbatt, lbatt, lever)
-            gap2, age2 = _phase2_gap(sim1, deploy_lap)
+            gap2, c_age2, l_age2 = _phase2_gap(sim1, deploy_lap)
             soc1 = sim1.get("summary", {}).get("leader_soc_end_pct")
             batt2 = soc1 if soc1 is not None else lbatt
+            # Each car's tyre age ticks from its OWN phase-1 age.
             tyres2 = {
                 "leader": {"compound": leader_tyre_compound,
-                           "age": age2 or leader_tyre_age + 1},
+                           "age": (l_age2 if l_age2 is not None
+                                   else leader_tyre_age + 1)},
                 "chaser": {"compound": chaser_tyre_compound,
-                           "age": age2 or chaser_tyre_age + 1},
+                           "age": (c_age2 if c_age2 is not None
+                                   else chaser_tyre_age + 1)},
             }
             sim2, ms2 = _leader_walk(
                 leader_code, chaser_code, track_name, deploy_lap + 1,
                 race_length, gap2, tyres2, year, cbatt, batt2,
                 pol.get("strike_lever") or 0.0)
+            # Wear per phase on the LEADER's compound: the concede/bank
+            # phase burns nothing (lever <= 0), the counter-strike pays.
+            wear_delta = (
+                _est_extra_wear(lever, len(sim1.get("laps") or []),
+                                leader_tyre_compound)
+                + _est_extra_wear(pol.get("strike_lever") or 0.0,
+                                  len(sim2.get("laps") or []),
+                                  leader_tyre_compound))
             summ = sim2["summary"]
             # Stitch phase-1 SOC rows in for the constraint check.
             stitched = [l["leader_soc_pct"] for l in sim1["laps"]
@@ -779,11 +917,21 @@ def evaluate_leader_policies(
                        if soc_end_mj is not None else 0.0)
         batt_cost = LAMBDA_BATT * soc_deficit
 
-        # Tyre cost of counter-deploying (push laps only, vs baseline).
-        push_laps = len(sim.get("laps") or [])
-        wear_cost = LAMBDA_WEAR * max(
-            0.0, _est_extra_wear(lever if preset is None else 0.0,
-                                 push_laps))
+        # Tyre cost of counter-deploying: priced per phase in the branch
+        # above (on the LEADER's compound) — the old code priced the
+        # phase-1 lever only, so BANK & STRIKE's full-lever strike was free.
+        wear_cost = LAMBDA_WEAR * max(0.0, wear_delta)
+
+        # Cliff risk: same rule as the chaser engine, keyed off the phase
+        # that actually pushes (the counter-strike for BANK & STRIKE).  A
+        # defence that only survives by draining the store to its floor
+        # must price the cliff — the old code exempted every two-phase
+        # defence from the penalty entirely (it barred the drain but
+        # scored it as free).
+        push_lever = _leader_push_lever(pol)
+        cliff_cost = CLIFF_RISK_S * (
+            1.0 if (min_soc_pct is not None and drained
+                    and push_lever > 0) else 0.0)
 
         infeasible = reserve_breach or drained
         # Score: the attack converting is the leader's loss (a walk that
@@ -794,7 +942,8 @@ def evaluate_leader_policies(
         position_risk = (LOST_POSITION_S if converted
                          else p_attack * LOST_POSITION_S)
         hold_credit = HELD_LAP_CREDIT_S * laps_held
-        score = position_risk + batt_cost + wear_cost - hold_credit
+        score = (position_risk + batt_cost + wear_cost + cliff_cost
+                 - hold_credit)
 
         rows.append({
             "policy": pol["name"],
@@ -824,6 +973,7 @@ def evaluate_leader_policies(
                 "hold_credit_s": round(hold_credit, 3),
                 "battery_cost_s": round(batt_cost, 3),
                 "wear_cost_s": round(wear_cost, 3),
+                "cliff_cost_s": round(cliff_cost, 3),
             },
             "score_s": round(score, 3),
             "feasible": not infeasible,
@@ -958,6 +1108,246 @@ def _reason_leader(best: dict, rows: list, no_hope: bool) -> str:
         bits.append(f"rejected {', '.join(infeasible)} — defence costs "
                     "battery the car does not have")
     return "; ".join(bits) + "."
+
+
+# ---------------------------------------------------------------------------
+# UNIFIED CALL — one decision from BOTH engines.
+#
+# The chaser engine answers "which attack policy?"; the leader engine
+# answers "which defence?".  Neither is a complete call alone: an attack
+# pick only means something against the defence the opponent will actually
+# run, and a defence pick only means something against the threat it faces.
+# `evaluate_call` runs BOTH and couples them:
+#
+#   1. the leader engine scores its five defences against a modelled
+#      attacking chaser and names its winner;
+#   2. that winner sets the posture the chaser engine is then scored
+#      against (COUNTER-DEPLOY / REACTIVE DEFENSE -> 'defensive_boost',
+#      anything else -> 'balanced'), so the attack pick has to beat the
+#      defence the OPPONENT's engine actually recommends rather than a
+#      posture a human toggled;
+#   3. the seat picks whose call is surfaced as THE CALL — but both engines
+#      always run, and every policy from both is returned, so the whole
+#      decision space stays inspectable.
+# ---------------------------------------------------------------------------
+
+# Merged-call latency budget: two full engine evaluations (the leader walk
+# set PLUS the chaser walk set) rather than one.  Disclosed and re-stated
+# from measurement, the same honesty rule as LATENCY_BUDGET_MS — the payload
+# reports its own latency_ms and the UI never claims faster than delivered.
+#
+# MEASURED (2026-09-10, this machine), fresh walk sets: ~1.2-1.3 s warm per
+# coupled call (leader engine ~0.6 s + chaser engine ~0.65 s, 8+5 walks
+# between them).  The engine cache does not change the budget — it covers
+# the REPEATED call (same state / seat flip), which is a different service
+# than the first evaluation of a state, and the payload's engine_cache
+# block discloses which side was reused.  Re-measure on presentation
+# hardware before quoting a number on stage.
+CALL_LATENCY_BUDGET_MS = 6000.0
+
+# Which leader defence forces the chaser engine to score against a reacting
+# leader.  The posture lever only has two settings (see
+# overtake_inference.LIVE_LEADER_DEFENSE_POSTURES), so the two defensive
+# postures that actually spend the leader's store map onto the one that
+# makes the leader faster.  The value-lever defences (banking) leave the
+# chaser's Balanced baseline honest.
+_DEFENCE_TO_POSTURE = {
+    "COUNTER-DEPLOY": "defensive_boost",
+    "REACTIVE DEFENSE": "defensive_boost",
+}
+
+
+def evaluate_call(
+        leader_code: str, chaser_code: str, track_name: str,
+        start_lap: int, race_length: int, gap_before_s: float,
+        leader_tyre_compound: str = "Medium",
+        chaser_tyre_compound: str = "Medium",
+        leader_tyre_age: float = 10.0, chaser_tyre_age: float = 10.0,
+        year: int | None = None,
+        battery_pct: float | None = None,
+        threat_battery_pct: float | None = None,
+        reserve_target_mj: float | None = None,
+        perspective: str = "chaser") -> dict[str, Any]:
+    """One merged call: both engines run, coupled, one decision out.
+
+    ``battery_pct`` is OUR car's battery (the seat's own car) and
+    ``threat_battery_pct`` the other car's — the caller does not have to
+    know which engine consumes which, the seat decides that mapping.
+
+    Returns the single ``final_call`` card for the chosen seat (carrying the
+    opponent engine's answer and the projected race window), every policy
+    from BOTH engines tagged with its ``seat``, and each engine's own
+    recommendation for drill-down.  Raises ValueError for an unusable
+    state, exactly like the two underlying engines.
+    """
+    t_start = time.perf_counter()
+    seat = str(perspective or "chaser").strip().lower()
+    if seat not in ("chaser", "leader"):
+        raise ValueError("perspective must be 'chaser' or 'leader'")
+
+    # Seat -> engine inputs.  From the chaser's seat OUR battery is the
+    # chaser's; from the leader's seat OUR battery is the leader's and the
+    # other car is the attacking threat.
+    if seat == "leader":
+        leader_batt, chaser_batt = battery_pct, threat_battery_pct
+    else:
+        leader_batt, chaser_batt = None, battery_pct
+
+    common = dict(
+        leader_code=leader_code, chaser_code=chaser_code,
+        track_name=track_name, start_lap=start_lap,
+        race_length=race_length, gap_before_s=gap_before_s,
+        leader_tyre_compound=leader_tyre_compound,
+        chaser_tyre_compound=chaser_tyre_compound,
+        leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
+        year=year, reserve_target_mj=reserve_target_mj,
+    )
+    reserve = (RESERVE_TARGET_MJ if reserve_target_mj is None
+               else float(reserve_target_mj))
+
+    # Engine-level cache: a repeated call on the same race state (and the
+    # seat flip at default batteries — the leader engine maps None onto
+    # ERS_DEFAULT_START_PCT) reuses a stored engine evaluation instead of
+    # re-simulating its walks.  Cached payloads are deep copies, so a hit
+    # cannot leak mutations into the caller's dict; each engine's stored
+    # latency_ms is kept but the payload discloses the reuse via
+    # engine_cache (a cached latency is never presented as fresh walk
+    # time).
+    leader_key = _engine_cache_key(
+        "leader", leader_code=leader_code, chaser_code=chaser_code,
+        track_name=track_name, start_lap=start_lap,
+        race_length=race_length, gap_before_s=gap_before_s,
+        leader_tyre_compound=leader_tyre_compound,
+        chaser_tyre_compound=chaser_tyre_compound,
+        leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
+        year=year, leader_batt=leader_batt, chaser_batt=chaser_batt,
+        reserve=reserve)
+    leader_out = _engine_cache_get(leader_key)
+    leader_cached = leader_out is not None
+    if leader_out is None:
+        leader_out = evaluate_leader_policies(
+            **common, leader_battery_pct=leader_batt,
+            chaser_battery_pct=chaser_batt)
+        _engine_cache_put(leader_key, leader_out)
+
+    # 2. COUPLE the engines: the defence the leader engine recommends sets
+    #    the posture the attack engine is scored against.  The coupling is
+    #    derived from the (possibly cached) leader payload — the cached
+    #    decision IS the decision, so the posture it produces is stable.
+    best_defence = leader_out["recommendation"]["action_card"]["action"]
+    posture = _DEFENCE_TO_POSTURE.get(best_defence, "balanced")
+    chaser_key = _engine_cache_key(
+        "chaser", leader_code=leader_code, chaser_code=chaser_code,
+        track_name=track_name, start_lap=start_lap,
+        race_length=race_length, gap_before_s=gap_before_s,
+        leader_tyre_compound=leader_tyre_compound,
+        chaser_tyre_compound=chaser_tyre_compound,
+        leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
+        year=year, leader_batt=leader_batt, chaser_batt=chaser_batt,
+        reserve=reserve, posture=posture)
+    chaser_out = _engine_cache_get(chaser_key)
+    chaser_cached = chaser_out is not None
+    if chaser_out is None:
+        chaser_out = evaluate_tactical_policies(
+            **common, chaser_battery_pct=chaser_batt, leader_posture=posture)
+        _engine_cache_put(chaser_key, chaser_out)
+
+    chaser_card = chaser_out["recommendation"]["action_card"]
+    leader_card = leader_out["recommendation"]["action_card"]
+
+    if seat == "leader":
+        card, opp_card = leader_card, chaser_card
+        opp_seat, opp_engine = "chaser", chaser_out["recommendation"]
+        own_engine = leader_out["recommendation"]
+    else:
+        card, opp_card = chaser_card, leader_card
+        opp_seat, opp_engine = "leader", leader_out["recommendation"]
+        own_engine = chaser_out["recommendation"]
+
+    # The race-call projection is the simulator's own no-lever walk — the
+    # timing evidence behind the manoeuvre, not a second opinion.
+    base = chaser_out["baseline"]
+
+    final_call = {
+        "seat": seat,
+        "action": card.get("action"),
+        "reason": card.get("reason"),
+        "deploy_lap": card.get("deploy_lap"),
+        "overtake_probability": chaser_card.get("overtake_probability"),
+        "threat_probability": leader_card.get("threat_probability"),
+        "hold_probability": leader_card.get("hold_probability"),
+        "energy_cost_mj": card.get("energy_cost_mj"),
+        "expected_finish_delta_s": card.get("expected_finish_delta_s"),
+        "battery_margin_pct": card.get("battery_margin_pct"),
+        "battery_margin_worst_pct": card.get("battery_margin_worst_pct"),
+        "soc_band_pct": card.get("soc_band_pct"),
+        "confidence": card.get("confidence"),
+        "feasible": card.get("feasible"),
+        "opponent": {
+            "seat": opp_seat,
+            "action": opp_card.get("action"),
+            "reason": opp_card.get("reason"),
+            "confidence": opp_card.get("confidence"),
+        },
+        "projection": {
+            "verdict": base.get("verdict"),
+            "pass_lap": base.get("pass_lap"),
+            "cumulative_probability": base.get("cumulative_probability"),
+            "avg_pace_gap_s": base.get("avg_pace_gap_s"),
+            "projected_final_gap_s": base.get("projected_final_gap_s"),
+        },
+        "engine_coupling": {
+            "our_engine": ("leader" if seat == "leader" else "chaser"),
+            "our_engine_runner_up": own_engine.get("runner_up"),
+            "opponent_engine_recommendation": best_defence,
+            "chaser_posture_used": posture,
+            "note": (
+                "The attack policies are scored against the defence the "
+                f"opponent's own engine recommends ({best_defence} -> "
+                f"'{posture}' posture), not a hand-set toggle. "
+                "Changing the seat re-uses the same coupled decision."),
+        },
+    }
+
+    # Every policy from BOTH engines, tagged with the seat it belongs to.
+    rows = ([dict(r, seat="chaser") for r in chaser_out["policies"]]
+            + [dict(r, seat="leader") for r in leader_out["policies"]])
+
+    elapsed_ms = (time.perf_counter() - t_start) * 1000.0
+    return {
+        "perspective": seat,
+        "perspective_label": ("LEADER — defending" if seat == "leader"
+                              else "CHASER — attacking"),
+        "state": chaser_out["state"],
+        "leader_state": leader_out["state"],
+        "final_call": final_call,
+        "policies": rows,
+        "chaser": {
+            "recommendation": chaser_out["recommendation"],
+            "baseline": chaser_out["baseline"],
+            "latency_ms": chaser_out["latency_ms"],
+        },
+        "leader": {
+            "recommendation": leader_out["recommendation"],
+            "baseline": leader_out["baseline"],
+            "latency_ms": leader_out["latency_ms"],
+        },
+        "scoring_constants": {
+            "chaser": chaser_out["scoring_constants"],
+            "leader": leader_out["scoring_constants"],
+        },
+        "latency_ms": round(elapsed_ms, 1),
+        "latency_budget_ms": CALL_LATENCY_BUDGET_MS,
+        "engine_cache": {
+            "leader_reused": leader_cached,
+            "chaser_reused": chaser_cached,
+            "note": ("reused the stored engine evaluation for the repeated "
+                     "call — latency_ms reflects the cache hit, not a fresh "
+                     "simulation"
+                     if (leader_cached or chaser_cached) else
+                     "fresh simulation — both engines walked this state"),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

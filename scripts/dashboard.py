@@ -2025,6 +2025,63 @@ def strategy_policies():
         return jsonify({"error": str(e)}), 500
 
 
+# THE CALL — ONE merged decision from BOTH engines (chaser + leader).
+#
+# The chaser engine answers "which attack policy?", the leader engine
+# "which defence?" — neither is a complete call alone.  policy_engine's
+# evaluate_call runs both, couples the defence the leader engine recommends
+# into the posture the attack engine is scored against, and returns ONE
+# final call for the chosen seat plus every policy from both engines.  This
+# route only parses/validates the state (same convention as
+# /api/strategy/policies).
+@app.route('/api/strategy/call', methods=['POST'])
+def strategy_call():
+    try:
+        body = request.get_json() or {}
+        leader = str(body.get('leader_code') or '').strip().upper()
+        chaser = str(body.get('chaser_code') or '').strip().upper()
+        track = str(body.get('track_name') or '').strip()
+        if not leader or not chaser or not track:
+            return jsonify({"error": "leader_code, chaser_code and "
+                                      "track_name required"}), 400
+        if leader == chaser:
+            return jsonify({"error": "Pick two different drivers."}), 400
+        seat = str(body.get('perspective') or 'chaser').strip().lower()
+        if seat not in ('chaser', 'leader'):
+            return jsonify({"error": "perspective must be 'chaser' or "
+                                      "'leader'"}), 400
+
+        def _num(key):
+            raw = body.get(key)
+            return float(raw) if raw not in (None, "") else None
+
+        year_raw = body.get('year')
+        year = int(year_raw) if year_raw not in (None, "") else None
+        result = policy_engine.evaluate_call(
+            leader_code=leader, chaser_code=chaser, track_name=track,
+            start_lap=int(body.get('start_lap') or 1),
+            race_length=int(body.get('race_length') or 57),
+            gap_before_s=float(body.get('gap_before_s') or 0.8),
+            leader_tyre_compound=body.get('leader_tyre_compound') or 'Medium',
+            chaser_tyre_compound=body.get('chaser_tyre_compound') or 'Medium',
+            leader_tyre_age=float(body.get('leader_tyre_age') or 0.0),
+            chaser_tyre_age=float(body.get('chaser_tyre_age') or 0.0),
+            year=year,
+            battery_pct=_num('battery_pct'),
+            threat_battery_pct=_num('threat_battery_pct'),
+            reserve_target_mj=_num('reserve_target_mj'),
+            perspective=seat,
+        )
+        resp = jsonify(result)
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 # ENERGY SANDBOX API (PPT module 02)
 #
 # Per-sector deployment reallocation inside a fixed per-lap budget: three

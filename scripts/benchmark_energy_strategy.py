@@ -1,7 +1,7 @@
 """Benchmark the deck's headline energy claim: AI strategy vs 'Flat-Out'.
 
 Reproduces the validation story on page 8 of the Trackshift "Hammer Time"
-deck ("Proven accuracy within ±1 lap and a 1.8s race time improvement in
+deck ("-1.8s race time improvement of AI strategy vs 'Flat-Out' in
 real-world scenarios", scenario: 2023 Monaco GP):
 
   * Flat-Out baseline  — the *push* energy mode: ask the era's full deploy
@@ -12,7 +12,7 @@ real-world scenarios", scenario: 2023 Monaco GP):
                          deck's "100% ERS now, slow in the final laps"
                          paradox.
   * AI-assisted strategy — the fastest mode whose trace finishes ABOVE the
-                         battery floor (the "FIA Battery Minimums" the deck
+                         battery floor (the self-imposed 10% management reserve the deck
                          claims are maintained): with the current simulator
                          that is *balanced* (2.20 MJ / 55% final, no
                          energy-limited laps).
@@ -381,8 +381,8 @@ def main():
                           "baseline, 2023 Monaco GP",
             "flat_out_mode": FLAT_OUT_MODE,
             "strategy_rule": "fastest mode whose final battery clears the "
-                             "management reserve (FIA battery-minimum "
-                             "compliance)",
+                             "management reserve (self-imposed "
+                             "10% floor)",
             "feasible_margin_mj": FEASIBLE_MARGIN_MJ,
             "notes": "The shared baseline lap time cancels out of every "
                      "delta, so stored lap times are used as the baseline. "

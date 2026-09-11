@@ -1,11 +1,11 @@
 {
  "meta": {
   "script": "scripts/benchmark_energy_strategy.py",
-  "generated_at": "2026-09-07T19:13:52",
+  "generated_at": "2026-09-10T23:18:59",
   "command": "scripts/benchmark_energy_strategy.py",
   "deck_claim": "Trackshift 'Hammer Time' deck p.8: '-1.8s race time improvement' of AI strategy vs 'Flat-Out' baseline, 2023 Monaco GP",
   "flat_out_mode": "push",
-  "strategy_rule": "fastest mode whose final battery clears the management reserve (FIA battery-minimum compliance)",
+  "strategy_rule": "fastest mode whose final battery clears the management reserve (self-imposed 10% floor)",
   "feasible_margin_mj": 0.05,
   "notes": "The shared baseline lap time cancels out of every delta, so stored lap times are used as the baseline. Closing phase = final --closing-laps laps of the race, the phase the deck's 'slow in the final laps' paradox describes."
  },

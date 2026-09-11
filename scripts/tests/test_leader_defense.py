@@ -186,17 +186,33 @@ class TestPolicyEnginePosture(unittest.TestCase):
             ds["score_s"], bs["score_s"],
             "defense must worsen TACTICAL STALK's score")
 
-    def test_defense_collapses_decision_margin(self):
-        """The adversarial mechanism, quantified: a defending leader eats
-        the attacker's edge, so the score gap between the best and second
-        policies collapses (measured: 0.73 s -> 0.19 s at the default
-        state) — the call becomes a coin flip the strategist must see."""
+    def test_defense_eats_the_attacker_edge(self):
+        """The adversarial mechanism, quantified: the attacker's EDGE is the
+        score gap between the best pure-attack policy and the best
+        conservative one.  A defending leader eats that edge — measured at
+        the default state: +0.199 s under a balanced leader (TACTICAL STALK
+        still wins the call) but -0.427 s under a defending one (the attack
+        loses outright and the call flips conservative).
+
+        History: before two-phase policies paid real strike wear/cliff
+        risk, this read as a 'decision-margin collapse' (top-2 gap 0.73 s
+        -> 0.19 s) — but the wide balanced gap was itself an artifact of
+        the free strike.  With honest pricing the balanced baseline is
+        already a near coin-flip, so the robust invariant is the EDGE, not
+        the top-2 gap."""
+        def attack_edge(out):
+            rows = {r["policy"]: r["score_s"] for r in out["policies"]}
+            best_attack = min(rows[p] for p in ("GREEDY ATTACK",
+                                                "TACTICAL STALK"))
+            best_safe = min(rows[p] for p in ("BALANCED HOLD",
+                                              "SAVE & DEFEND"))
+            return best_safe - best_attack
+
         bal = self._evaluate("balanced", chaser_battery_pct=62.5)
         dfn = self._evaluate("defensive_boost", chaser_battery_pct=62.5)
         self.assertLess(
-            dfn["recommendation"]["decision_margin_s"],
-            bal["recommendation"]["decision_margin_s"],
-            "defense must collapse the decision margin")
+            attack_edge(dfn), attack_edge(bal),
+            "defense must eat the attacker's edge")
 
     def test_adversarial_flip_to_save_at_mid_battery(self):
         """The demo beat: mid battery, a passive leader allows an attacking
