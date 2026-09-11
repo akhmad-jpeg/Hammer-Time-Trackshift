@@ -675,6 +675,102 @@ def extract_race_control_events(session) -> list[tuple[str, float | None]]:
 
 
 # ---------------------------------------------------------------------------
+# Telemetry storage mode — FULL RESOLUTION
+#
+# FastF1 lap.get_telemetry() delivers one row per ~0.2-0.3 s (~200-300+ rows
+# per lap) with Date/timestamps, X/Y/Z track coordinates and lap Distance.
+# Every sample is stored with its intra-lap time (time_s, seconds from the
+# lap's own start, anchored to the first sample) and distance (distance_m,
+# metres along the lap).  The old importer decimated the trace to ~5-6
+# timestamp-less samples per lap, which left the regen model a x2.2
+# sampling-compensation fudge, broke intra-lap alignment, and killed brake
+# evidence (compounded by a /100 bug that reduced the boolean Brake channel
+# to 0.01).  Storing the full trace removes all four problems at the root.
+# Consumers are density-aware (see energy_simulator._speed_drop_regen) so
+# mixed-resolution databases work.
+TELEMETRY_FULL_RESOLUTION = True
+
+# Safety valve: FastF1 telemetry rows per lap can spike on data glitches
+# (duplicate timestamps / stalled ECU feeds).  Caps the per-lap row budget
+# without ever touching well-formed ~200-300-row laps.
+TELEMETRY_MAX_ROWS_PER_LAP = 2000
+
+
+def _prepare_telemetry_rows(lap_id: int, telem) -> list[tuple]:
+    """Normalise one lap's full-resolution FastF1 telemetry into DB tuples.
+
+    Returns tuples shaped for the telemetry INSERT (see import_race):
+        (lap_id, speed, throttle, brake, gear, rpm, drs, time_s, distance_m)
+    in trace order (FastF1 returns telemetry sorted by Date).
+
+    time_s anchors to the lap's FIRST sample (0.0): the intra-lap clock the
+    consumers use to align laps on a common time grid.  distance_m comes
+    from FastF1's Distance channel when present, else integrated from speed
+    over each sample's dt (metres).  Both may be None only when the lap
+    carries a single sample (no dt exists) — degenerate laps never occur in
+    healthy sessions.
+    """
+    if telem is None or telem.empty:
+        return []
+    if len(telem) > TELEMETRY_MAX_ROWS_PER_LAP:
+        logging.warning(
+            f"Lap {lap_id}: telemetry trace has {len(telem)} rows "
+            f"(cap {TELEMETRY_MAX_ROWS_PER_LAP}) — truncating."
+        )
+        telem = telem.iloc[:TELEMETRY_MAX_ROWS_PER_LAP]
+
+    n = len(telem)
+    t0 = None
+    if "Date" in telem.columns and pd.notna(telem["Date"].iloc[0]):
+        try:
+            t0 = pd.Timestamp(telem["Date"].iloc[0]).to_pydatetime()
+        except Exception:
+            t0 = None
+
+    has_dist_col = "Distance" in telem.columns
+    rows: list[tuple] = []
+    t_prev = None   # previous sample's intra-lap time (s)
+    v_prev = 0.0    # previous sample's speed (m/s)
+    d_prev = 0.0    # running integrated distance (m)
+    for _, row in telem.iterrows():
+        speed    = int(row["Speed"])    if pd.notna(row["Speed"])    else 0
+        throttle = round(float(row["Throttle"]) / 100.0, 2) if pd.notna(row["Throttle"]) else 0.0
+        # FastF1's Brake channel is BOOLEAN (True = pedal applied), already
+        # 0..1 — the old /100 scaled a True to 0.01, discarding braking
+        # evidence entirely.  Store 0.0/1.0 as a 0..1 intensity.
+        brake = 1.0 if (pd.notna(row["Brake"]) and bool(row["Brake"])) else 0.0
+        gear     = int(row["nGear"])    if pd.notna(row["nGear"])    else 0
+        rpm      = int(row["RPM"])      if pd.notna(row["RPM"])      else 0
+        drs      = 1 if (pd.notna(row["DRS"]) and int(row["DRS"]) in (10, 12, 14)) else 0
+
+        time_s = None
+        if t0 is not None:
+            ts = row.get("Date")
+            if pd.notna(ts):
+                time_s = round((pd.Timestamp(ts).to_pydatetime() - t0).total_seconds(), 4)
+        if time_s is None and t_prev is not None:
+            # Rare mid-trace NaT: hold the previous timestamp so the sample
+            # keeps its position on the intra-lap clock.
+            time_s = t_prev
+
+        v_ms = speed / 3.6
+        if has_dist_col and pd.notna(row.get("Distance")):
+            distance_m = round(float(row["Distance"]), 2)
+        else:
+            # No Distance channel: integrate speed over each sample's dt
+            # (trapezoid, metres).
+            dt = (time_s - t_prev) \
+                if (t_prev is not None and time_s is not None and time_s >= t_prev) else 0.0
+            d_prev += 0.5 * (v_ms + v_prev) * dt
+            distance_m = round(d_prev, 2)
+
+        t_prev, v_prev = time_s, v_ms
+        rows.append((lap_id, speed, throttle, brake, gear, rpm, drs,
+                     time_s, distance_m))
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Core importer
 # ---------------------------------------------------------------------------
 
@@ -871,6 +967,7 @@ def import_race(year: int, race_name: str, driver_id: int,
         lap_count       = 0
         telem_count     = 0
         telem_failures  = 0
+        telem_full_res  = 0
 
         # Build a map of lap_number -> lap_id once inserted, so the pit-stop
         # block on the in-lap can look up the *next* lap's PitOutTime.
@@ -933,24 +1030,22 @@ def import_race(year: int, race_name: str, driver_id: int,
                     pit_out_same = lap.get("PitOutTime")  # may or may not exist on same row
                     pit_in_rows.append((lap_num, lap_id, pit_in_time, pit_out_same))
 
-                # Telemetry — log failures, do not silently swallow them
+                # Telemetry — full resolution.  FastF1 delivers one row
+                # per ~0.2-0.3 s (~200-300+ rows/lap); every sample is
+                # stored with its intra-lap time_s / distance_m (see
+                # _prepare_telemetry_rows).  Log failures, never swallow.
                 try:
                     telem = lap.get_telemetry()
-                    if telem is not None and not telem.empty:
-                        step    = max(1, len(telem) // 5)
-                        sampled = telem.iloc[::step]
-                        for _, row in sampled.iterrows():
-                            speed    = int(row["Speed"])    if pd.notna(row["Speed"])    else 0
-                            throttle = round(float(row["Throttle"]) / 100.0, 2) if pd.notna(row["Throttle"]) else 0.0
-                            brake    = round(float(row["Brake"])    / 100.0, 2) if pd.notna(row["Brake"])    else 0.0
-                            gear     = int(row["nGear"])    if pd.notna(row["nGear"])    else 0
-                            rpm      = int(row["RPM"])      if pd.notna(row["RPM"])      else 0
-                            drs      = 1 if (pd.notna(row["DRS"]) and int(row["DRS"]) in (10, 12, 14)) else 0
-                            cursor.execute(
-                                "INSERT INTO telemetry (lap_id, speed, throttle, brake, gear, rpm, drs) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                                (lap_id, speed, throttle, brake, gear, rpm, drs),
-                            )
-                            telem_count += 1
+                    tel_rows = _prepare_telemetry_rows(lap_id, telem)
+                    if tel_rows:
+                        cursor.executemany(
+                            "INSERT INTO telemetry (lap_id, speed, throttle, brake, "
+                            "gear, rpm, drs, time_s, distance_m) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            tel_rows,
+                        )
+                        telem_count += len(tel_rows)
+                        telem_full_res += 1
                 except Exception as telem_err:
                     telem_failures += 1
                     logging.warning(f"Telemetry failed on lap {lap_num}: {telem_err}")
@@ -1060,7 +1155,8 @@ def import_race(year: int, race_name: str, driver_id: int,
         print(f"  Laps            : {lap_count}")
         print(f"  Pit stops       : {pit_stop_count}")
         print(f"  SC/VSC/RF events: {rc_event_count}")
-        print(f"  Telemetry       : {telem_count} samples")
+        print(f"  Telemetry       : {telem_count} samples "
+              f"(full resolution, {telem_full_res} laps)")
         print(f"  Telem fails     : {telem_failures}")
         print("=" * 60 + "\n")
 

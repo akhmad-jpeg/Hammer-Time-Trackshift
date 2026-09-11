@@ -176,7 +176,7 @@ def session_payload(conn, session_id, energy_pace, pace_override=None,
 
     ids = [l['lap_id'] for l in laps]
     ph = ','.join(['%s'] * len(ids))
-    cur.execute(f"SELECT lap_id, speed FROM telemetry WHERE lap_id IN ({ph}) "
+    cur.execute(f"SELECT lap_id, speed, time_s FROM telemetry WHERE lap_id IN ({ph}) "
                 f"ORDER BY telemetry_id", ids)
     telem = {}
     for row in cur.fetchall():

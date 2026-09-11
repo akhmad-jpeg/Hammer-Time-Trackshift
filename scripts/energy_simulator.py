@@ -6,9 +6,11 @@ is that synthesiser, deliberately crude but self-consistent and shaped to the
 FIA 2026 power-unit regulations:
 
   * per-lap regeneration is estimated from the speed trace actually stored in
-    `telemetry` (kinetic energy lost between consecutive samples) -- braking
-    pedal data is useless at the ~6 samples/lap the importer stores, but speed
-    drops survive the sampling.  The trace is capped by the regulation's
+    `telemetry` (kinetic energy lost between consecutive samples) -- the
+    estimate is sampling-density aware: full-resolution traces (the
+    importer's ~0.2-0.3 s samples with intra-lap time_s) integrate braking
+    directly with no compensation, while sparse legacy ~6-sample laps get
+    the x2.2 under-sampling correction.  The trace is capped by the regulation's
     per-lap electrical harvest limit (C5.2.10: 8.5 MJ/lap for the 2026 PU;
     2 MJ/lap for the 2014-2025 PU) and by the store's headroom -- a full
     battery cannot accept regen, so surplus is wasted to the friction brakes;
@@ -354,11 +356,27 @@ MODES = {
     "liftcoast": {"regen_style": 1.20, "deploy": "hold", "soc_target": 0.90},
 }
 
-# The importer stores only ~6 telemetry rows/lap, so the sampled speed trace
-# under-detects braking: raw kinetic-loss sums come out at ~1-3.6 MJ/lap where
-# a real Spa lap recovers ~5-7 MJ.  REGEN_SAMPLING_SCALE compensates for that
-# under-sampling (crude); traces still vary lap-to-lap, which is the point.
+# Sampling-density compensation for the regen estimate.
+#
+# The LEGACY importer stored only ~6 timestamp-less telemetry rows/lap, so
+# its speed trace under-detected braking: raw kinetic-loss sums came out at
+# ~1-3.6 MJ/lap where a real Spa lap recovers ~5-7 MJ.  REGEN_SAMPLING_SCALE
+# compensates for that under-sampling at the legacy density.
+#
+# The importer is now FULL-RESOLUTION (~200-300 timestamped rows/lap): a
+# dense trace already integrates the true braking events, so any additional
+# scaling would multiply real physics by a fudge factor (raw 6 MJ/lap would
+# read as 13 MJ/lap and then hide behind the harvest cap).  _speed_drop_regen
+# is therefore DENSITY-AWARE: full-resolution traces get scale 1.0 (no
+# fudge), the heuristic n-based fallback covers timestamp-less traces, and
+# the legacy x2.2 applies only to genuinely sparse (~6 sample) laps.
 REGEN_SAMPLING_SCALE = 2.2
+
+# Trace densities (rows per lap).  Traces at or above FULL_RES_MIN_ROWS are
+# treated as full resolution when no timestamps exist to measure the real
+# sample rate; between the two sits the sparse-legacy gray zone.
+FULL_RES_MIN_ROWS = 80
+SPARSE_MAX_ROWS = 12
 
 # Used only when a lap's trace cannot detect ANY speed drop (missing samples).
 REGEN_FALLBACK_MJ = 5.0
@@ -375,14 +393,52 @@ def _spec(spec_key: str) -> dict:
     return PU_SPECS[spec_key]
 
 
+def _sampling_scale_factor(samples: list[dict]) -> float:
+    """Sampling-density compensation factor for a lap's speed trace.
+
+    1.0 means the trace is dense enough to integrate braking as-is (no
+    fudge); larger values multiply the raw kinetic-loss sum to compensate
+    for under-sampling.
+
+    * Measured, when the samples carry intra-lap ``time_s`` (the
+      full-resolution importer writes it): a median inter-sample dt of
+      0.5 s or less (>= 2 Hz) is genuinely full resolution -> 1.0.
+    * Everything else (timestamp-less rows, sparse timestamped laps) uses
+      the row-count heuristic: >= FULL_RES_MIN_ROWS rows -> 1.0,
+      <= SPARSE_MAX_ROWS rows (the legacy ~6-sample density) ->
+      REGEN_SAMPLING_SCALE, linear ramp between.
+    """
+    n = len(samples)
+    if n < 2:
+        return REGEN_SAMPLING_SCALE
+
+    times = [s.get("time_s") for s in samples]
+    if all(t is not None for t in times):
+        dts = [b - a for a, b in zip(times, times[1:]) if b > a]
+        if dts:
+            dts.sort()
+            if dts[len(dts) // 2] <= 0.5:      # >= 2 Hz — full resolution
+                return 1.0
+
+    # Row-count heuristic (timestamp-less traces and sparse laps).
+    if n >= FULL_RES_MIN_ROWS:
+        return 1.0
+    if n <= SPARSE_MAX_ROWS:
+        return REGEN_SAMPLING_SCALE
+    frac = (n - SPARSE_MAX_ROWS) / float(FULL_RES_MIN_ROWS - SPARSE_MAX_ROWS)
+    return REGEN_SAMPLING_SCALE - frac * (REGEN_SAMPLING_SCALE - 1.0)
+
+
 def _speed_drop_regen(samples: list[dict], spec_key: str = DEFAULT_SPEC) -> float:
     """Regeneration (MJ) from kinetic energy lost on detected speed drops.
 
     Each consecutive sample pair with v_{i+1} < v_i is treated as a braking
     event; the energy recovered is eta * 0.5 * m * (v_i^2 - v_{i+1}^2).
-    The raw sum is scaled by REGEN_SAMPLING_SCALE to compensate for the
-    coarse ~6 samples/lap (see note above) and capped by the era's per-lap
-    harvest limit (C5.2.10 for 2026; 2 MJ for the legacy PU).
+    The raw sum is scaled by a DENSITY-AWARE sampling factor
+    (_sampling_scale_factor): 1.0 on full-resolution traces (the importer's
+    ~0.2-0.3 s samples carry their intra-lap time_s), the legacy x2.2 only
+    on ~6-sample laps.  The result is capped by the era's per-lap harvest
+    limit (C5.2.10 for 2026; 2 MJ for the legacy PU).
     """
     spec = _spec(spec_key)
     mass = spec["car_mass_kg"]
@@ -393,7 +449,7 @@ def _speed_drop_regen(samples: list[dict], spec_key: str = DEFAULT_SPEC) -> floa
         for a, b in zip(speeds, speeds[1:]):
             if b < a:
                 recovered += 0.5 * mass * (a * a - b * b) * 0.8  # REGEN_EFFICIENCY
-    recovered = recovered / 1e6 * REGEN_SAMPLING_SCALE
+    recovered = recovered / 1e6 * _sampling_scale_factor(samples)
     if recovered <= 0.0:
         return min(REGEN_FALLBACK_MJ, harvest_limit)
     return min(recovered, harvest_limit)
@@ -703,7 +759,7 @@ def simulate_session_energy(session_id: int, mode: str, dry_run: bool = False) -
     if laps:
         ids = [l["lap_id"] for l in laps]
         ph = ",".join(["%s"] * len(ids))
-        cur.execute(f"SELECT lap_id, speed FROM telemetry WHERE lap_id IN ({ph}) ORDER BY telemetry_id", ids)
+        cur.execute(f"SELECT lap_id, speed, time_s FROM telemetry WHERE lap_id IN ({ph}) ORDER BY telemetry_id", ids)
         for row in cur.fetchall():
             telem.setdefault(row["lap_id"], []).append(row)
 

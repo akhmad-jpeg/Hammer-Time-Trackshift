@@ -435,12 +435,22 @@ def update_lap_time(conn, lap_id: int, lap_time_ms: int, is_valid: bool) -> None
 
 
 def insert_telemetry(conn, lap_id: int, speed: int, throttle: float,
-                     brake: float, gear: int, rpm: int, drs: bool) -> None:
+                     brake: float, gear: int, rpm: int, drs: bool,
+                     time_s: float | None = None) -> None:
+    """Insert one telemetry sample.
+
+    ``time_s`` is the intra-lap clock in seconds (the game feed's
+    current_lap_time at packet time).  Optional so the legacy 7-column call
+    shape keeps working; historical FastF1 full-resolution rows carry
+    time_s, live-capture rows carry it when the feed provides the lap
+    clock, and both stay NULL-compatible with the schema (the columns are
+    NULL by default).
+    """
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO telemetry (lap_id, speed, throttle, brake, gear, rpm, drs) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (lap_id, speed, throttle, brake, gear, rpm, 1 if drs else 0),
+        "INSERT INTO telemetry (lap_id, speed, throttle, brake, gear, rpm, drs, time_s) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+        (lap_id, speed, throttle, brake, gear, rpm, 1 if drs else 0, time_s),
     )
     conn.commit()
     cursor.close()
@@ -550,8 +560,10 @@ def db_worker(db_queue: queue.Queue, stop_event: threading.Event,
                 _, lap_id, lap_time_ms, is_valid = task
                 update_lap_time(conn, lap_id, lap_time_ms, is_valid)
             elif action == "insert_telemetry":
-                _, lap_id, speed, throttle, brake, gear, rpm, drs = task
-                insert_telemetry(conn, lap_id, speed, throttle, brake, gear, rpm, drs)
+                _, lap_id, speed, throttle, brake, gear, rpm, drs = task[:8]
+                time_s = task[8] if len(task) > 8 else None
+                insert_telemetry(conn, lap_id, speed, throttle, brake, gear,
+                                 rpm, drs, time_s=time_s)
             elif action == "insert_strategy_event":
                 _, lap_id, event_type, duration_sec = task
                 insert_strategy_event(conn, lap_id, event_type, duration_sec)
@@ -1083,6 +1095,8 @@ def main() -> None:
                     current_lap_id,
                     parsed["speed"], parsed["throttle"], parsed["brake"],
                     parsed["gear"], parsed["rpm"], parsed["drs"],
+                    (round(float(current_lap_time), 3)
+                     if current_lap_time and current_lap_time > 0 else None),
                 ))
 
             if heartbeat_interval <= 0 and packet_count % 500 == 0:
