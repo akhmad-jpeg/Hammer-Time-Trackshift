@@ -140,3 +140,53 @@ demo costs the room.
   by `benchmark_energy_strategy.py`, drift-checked; keep the closing-phase
   qualifier visible.
 - "Under 300 ms" — true for the sandbox once scoped (Fix 2).
+
+---
+
+## SECOND-PASS AUDIT (PDF re-read against the repo, Sept 11)
+
+A direct re-extraction of the exported PDF found more items the first pass missed.
+All verified against the committed code/artifacts on this date.
+
+5. **Page 8: "<2ms INFERENCE SPEED" chip.** This is the exact single-digit-millisecond
+   phrasing the claim guard bans (`verify_claims.py` exits non-zero on it) — the first
+   pass caught page 5's "<5MS" but missed this one. Also "<500ms SIMULATION SPEED / 20-lap
+   full race simulation": a single-mode 20-lap projection is that fast, but the full
+   multi-policy rollout is seconds-class. Replace with the scoped, real budget:
+   "LIVE CALL ~200ms · POLICY ROLLOUT seconds · SANDBOX warm in tens of ms".
+
+6. **Page 5: "MySQL utilizing schema.sql".** The file is `database/f1_strategy.sql`.
+   A judge opening the repo will search for "schema.sql" and find nothing. Rename the
+   chip (or actually add a schema.sql alias) — trivial but visible.
+
+7. **Pages 5+6: "23 tracks / TRACK CIRCUITS 23 Units".** Stale. The trained lap-time
+   model covers **32 tracks** (83 features, `ml_models/model_info.json`); the overtake
+   model covers **29** (`ml_models/overtake/model_info.json`). Say "30+ circuits" or the
+   exact counts — the committed artifacts make this a free upgrade, not a risk.
+
+8. **Page 7: energy constants "CONSUMPTION −2%/sec @ 100% throttle" and "RECOVERY +0.5%".
+   ** Not the code's physics. The engine is MJ-based: deploy/recover rate **0.12 MJ/s
+   (120 kW)** against a **4 MJ store** (= 3%/s at full deploy, not 2%), recovery gated by
+   a 4 MJ/lap flow cap and the 2 MJ/lap harvest limit, plus the 10% management reserve.
+   Replace the two chips with: "0.12 MJ/s deploy · 4 MJ store · 10% reserve".
+
+9. **Page 3: six mode chips (PUSH / BALANCED / LIFT & COAST / HIGH DRAIN / OPTIMUM /
+   RECOVERY).** The simulator implements exactly **three** modes — push, balanced,
+   lift & coast (see `benchmark_energy_strategy.py` output). Cut the extra chips or be
+   ready for "what is OPTIMUM mode?" — there is no such mode in the code.
+
+10. **Page 8: the Monaco backtest anecdote ("first 5 laps only → AI predicted Lap 12,
+    actual Lap 13").** No committed artifact backs this specific story, and it is the
+    source of the "±1 LAP ACCURACY" chip. Strongest honest replacement (and a better
+    slide): the reliability table — "1,717 checkpoints replayed across 84 weekends;
+    confidence ≥ 0.80 carried an 18% real pass rate vs the 10% base rate (2.12× at
+    P ≥ 0.95)" — `scripts/backtests/race_call_reliability_slide.md` is already
+    slide-shaped.
+
+11. **Page 6: the LR-vs-RF slide has no numbers.** The choice is defensible; make it
+    un-assailable by adding the committed metrics: lap-time model MAE **1.61 s**,
+    R² **0.93** within-track (`ml_models/model_info.json`).
+
+12. **Page 9: "github.com/akhmad-jpeg/Motorsports-telemetry".** Confirm this URL is the
+    exact public repo you are presenting from, and that it is public. If judges open it
+    during Q&A, the README's claim→receipt table is waiting for them.
