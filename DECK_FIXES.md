@@ -187,6 +187,8 @@ All verified against the committed code/artifacts on this date.
     un-assailable by adding the committed metrics: lap-time model MAE **1.61 s**,
     R² **0.93** within-track (`ml_models/model_info.json`).
 
-12. **Page 9: "github.com/akhmad-jpeg/Motorsports-telemetry".** Confirm this URL is the
-    exact public repo you are presenting from, and that it is public. If judges open it
-    during Q&A, the README's claim→receipt table is waiting for them.
+12. **Page 9: "github.com/akhmad-jpeg/Motorsports-telemetry".** RESOLVED — the actual
+    public repo is **github.com/akhmad-jpeg/Hammer-Time-Trackshift** (verified live:
+    the push target of this machine). Update the slide to that URL; as printed, it
+    would 404 if a judge types it during Q&A. When they open the right one, the
+    README's claim→receipt table is waiting for them.
