@@ -1,0 +1,116 @@
+=====================================================================
+ TRACKSHIFT — HAMMER TIME · 3-MINUTE PITCH SCRIPT
+=====================================================================
+ Calibrated: ~430 spoken words -> ~2:50 at presenting pace, leaving
+ ~10 s of slack for demo clicks. Bracketed [ALL-CAPS] lines are stage
+ directions / clicks — do NOT read them aloud. If you blank out, jump
+ to the SAFETY NET: the whole pitch is five words —
+ BATTERY · TWO CARS · REFUSAL · 18-vs-10 · 1.9 SECONDS.
+
+---------------------------------------------------------------------
+ [0:00] HOOK + INTRO  (~15 s)
+---------------------------------------------------------------------
+ Hi, I'm Ayaan, Team Underdogs.
+
+ Quick question: when does the fastest lap LOSE you the race?
+ When it's the wrong lap to spend your battery.
+
+ We built Trackshift — a pit-wall co-pilot that knows when to push,
+ when to wait — and when to say no.
+
+---------------------------------------------------------------------
+ [0:15] THE PROBLEM  (~25 s)
+---------------------------------------------------------------------
+ Deploy one hundred percent ERS, you get the overtake — and arrive at
+ the final laps defenceless. Fast now, slow later. That's the paradox.
+
+ And underneath it: Formula 1 does not broadcast battery state. Not
+ on TV, not in the feed. Every pit-wall tool shows speed and RPM —
+ none answer the only question that matters: SHOULD I PUSH NOW?
+
+---------------------------------------------------------------------
+ [0:40] THE SOLUTION  (~35 s)
+---------------------------------------------------------------------
+ Trackshift answers it in three layers.
+
+ ONE — seven seasons of real F1 history: 571 sessions, both cars'
+ actual laps in every duel.
+
+ TWO — we simulate TWO cars at once. Leader and chaser. Attack AND
+ defence. An overtake is a fight, not a forecast.
+
+ THREE — we synthesize the missing battery, honestly: a published
+ uncertainty band, plus or minus two to eight percent — never fake
+ precision.
+
+ On top: a decision engine scoring five strategies, with one hard
+ rule — it NEVER recommends a move the battery can't pay for.
+ It refuses. The refusal IS the product.
+
+---------------------------------------------------------------------
+ [1:15] DEMO  (~55 s)  — dashboard open on the Race Call view
+---------------------------------------------------------------------
+ [SHOW race call panel]
+ A live race call. Both cars projected lap by lap — the pass
+ probability climbs onto the braking zones where passes happen.
+
+ [POINT at policy table]
+ Five strategies, priced in race-time seconds: pass gain, battery
+ cost, tyre wear, latency. Tactical Stalk wins — bank now, strike
+ two laps later.
+
+ [DRAG battery slider to ~31%]
+ Now — battery at thirty-one percent, the reserve floor. Every attack
+ just went infeasible. It doesn't gamble: Save and Defend, car stays
+ alive. That's the slide nobody else can show.
+
+ [CLICK reliability panel]
+ And we show our own accuracy inside the product.
+
+---------------------------------------------------------------------
+ [2:10] THE RECEIPTS  (~25 s)
+---------------------------------------------------------------------
+ Three numbers.
+
+ 1,717 real checkpoints replayed: confident calls saw a real pass 18
+ percent of the time versus a 10 percent base — measured, not asserted.
+
+ Monaco: AI strategy beats flat-out by 1.9 seconds in the closing
+ phase — reproduced bit-identically on two telemetry generations.
+
+ And every claim has a command in the repo that re-runs it.
+
+---------------------------------------------------------------------
+ [2:35] CLOSE  (~15 s)
+---------------------------------------------------------------------
+ F1 doesn't broadcast the battery. We synthesized it, measured it,
+ and built a co-pilot that spends it like it matters.
+
+ When the battery says no — Trackshift says no.
+
+ Thank you.
+
+=====================================================================
+ SAFETY NET — if you blank, say this skeleton and re-orient:
+   "Fast now, slow later — the paradox. We simulate TWO cars, we
+    synthesize the battery HONESTLY, and the engine REFUSES moves the
+    battery can't pay for. 18 versus 10. 1.9 seconds. That's it."
+=====================================================================
+
+ LIKELY Q&A (one-line answers — not part of the 3 minutes):
+ - Accuracy?     -> "Published: reliability table over 1,717
+                    checkpoints; AUC 0.97 on a held-out later-era
+                    split; precision-recall shown, not hidden."
+ - Battery real? -> "Synthesized — F1 doesn't broadcast it — with a
+                    published band; the engine prices the WORST case."
+ - FIA-legal?    -> "The 10% reserve is OUR management policy; we
+                    claim no rulebook authority."
+ - Live feed?    -> "UDP capture is built, labelled 'in development';
+                    everything demoed is real historical telemetry."
+ - Why not deep learning? -> "A choice: linear keeps tyre physics
+                    monotonic and interpretable — AUC 0.97 anyway."
+
+ BEFORE YOU WALK UP:
+ - Server running · Race Call view loaded · slider reachable.
+ - If the demo dies: say the skeleton, show the reliability panel,
+   land the close. The pitch works without the demo.
