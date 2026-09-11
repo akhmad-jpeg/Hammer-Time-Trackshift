@@ -125,17 +125,30 @@ class TwoPhaseChaserPricing(unittest.TestCase):
             hold["score_components"]["wear_cost_s"])
 
     def test_strike_wear_matches_the_analytic_strike_formula(self):
-        # Pin the exact pricing: the stalk banks in phase 1 (zero wear) and
-        # pays full lever for every lap of the strike phase.  Walk length
-        # is deterministic (non-converting walks run to the flag), so the
-        # formula is exact: rate(lever_frac=1, compound) x (L - deploy_lap).
+        # Pin the exact pricing: the stalk banks in phase 1 (zero wear — a
+        # negative lever clamps to 0) and pays full lever for every lap of
+        # the strike phase.  The strike-lap count is reconstructed from the
+        # row itself — phase 2 always runs from deploy_lap+1 to the flag,
+        # truncated only by a phase-2 pass (pass_lap is phase 2's call) —
+        # so the formula is exact under ANY classifier, including a
+        # retrained saturating one where the strike converts on its first
+        # lap (the old hard-coded (50 - 22) assumed a full-length walk).
         from tyre_degradation import tyre_health
+        row = self._row("TACTICAL STALK")
+        deploy_lap = row["deploy_lap"]
+        self.assertEqual(deploy_lap, 20 + 2,  # start_lap + deploy_offset
+                         "setup: the stalk's strike phase starts at L22")
+        strike_laps = ((row["pass_lap"] - deploy_lap) if row["pass_lap"]
+                       else (50 - deploy_lap))
+        self.assertGreaterEqual(strike_laps, 1,
+                                "setup: the strike phase ran at least one lap")
         rate = float(tyre_health("Medium", 0)) - float(tyre_health("Medium", 1))
-        expected = pe.LAMBDA_WEAR * rate * (50 - 22)   # start 20, deploy +2
-        stalk = self._row("TACTICAL STALK")["score_components"]["wear_cost_s"]
+        expected = pe.LAMBDA_WEAR * rate * strike_laps
+        stalk = row["score_components"]["wear_cost_s"]
         self.assertAlmostEqual(stalk, round(expected, 3), places=2,
                                msg="stalk wear must be the STRIKE phase's "
-                                   "full-lever cost, not phase-1 (old: 0.0)")
+                                   "full-lever cost for exactly the laps it "
+                                   "ran, not phase-1 (old: 0.0)")
 
     def test_push_lever_selects_the_striking_phase(self):
         stalk = next(p for p in pe.POLICIES if p["name"] == "TACTICAL STALK")

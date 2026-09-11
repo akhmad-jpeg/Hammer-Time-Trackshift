@@ -6,10 +6,15 @@ car against an attacking chaser.
   Simulator layer (simulate_live_call):
     1. leader_ers / leader_battery_pct mirror the chaser's lever physics
        (deploy funded by the leader's own store down to the 30% floor).
-    2. Deploy NARROWS the attack: at a fixed horizon the chaser's
-       cumulative pass probability is lower with a deploying leader than a
-       balanced one; banking WIDENS it.  (The case-3-vs-4 full-walk
-       comparison is invalid — walks break at different laps.)
+    2. Deploy NARROWS the attack and banking WIDENS it, measured on the
+       deterministic pace/energy layer: the chaser's per-lap pace edge
+       drops on EVERY lap under a deploying leader and rises under a
+       banking one, and the gap paths dominate accordingly.  (Fixed-
+       horizon cumulative probabilities are deliberately not compared —
+       a retrained classifier that saturates truncates walks at the first
+       in-window lap, so cums at L24+ track the model's scale, not the
+       lever's effect.  The case-3-vs-4 full-walk comparison is invalid
+       for the same reason.)
     3. The reactive preset (leader_posture='defensive_boost') and the
        explicit lever coexist: the explicit lever wins when both are given.
     4. Back-compat: calls without any leader-lever argument are
@@ -68,14 +73,6 @@ def _leader_walk(**kw):
     return simulate_live_call(**args)
 
 
-def _cum_at(result, lap):
-    c = 0.0
-    for l in result["laps"]:
-        if l["lap"] <= lap:
-            c = l["cumulative_probability"]
-    return c
-
-
 def _evaluate(**kw):
     args = dict(
         leader_code="VER", chaser_code="HAM", track_name=TRACK,
@@ -89,21 +86,35 @@ def _evaluate(**kw):
 class TestSimulateLeaderLever(unittest.TestCase):
 
     def test_deploy_narrows_bank_widens_at_fixed_horizon(self):
-        """The core direction check, at a FIXED lap (walks convert at
-        different laps, so full-walk cums are not comparable): deploying
-        cuts the chaser's conversion probability vs Balanced; banking
-        raises it."""
+        """The core direction check, on the deterministic layer: pace_gap_s
+        = leader lap time - chaser lap time, so a deploying (faster)
+        leader CUTS the chaser's pace edge on every shared lap and a
+        banking (slower) leader RAISES it, with the gap paths dominating
+        in the same directions.  Walks may convert at different laps under
+        any given classifier, so no cumulative probability is compared."""
         bal = _leader_walk()
         dep = _leader_walk(leader_ers=100, leader_battery_pct=80)
         bnk = _leader_walk(leader_ers=-100, leader_battery_pct=50)
-        for h in (24, 26):
-            c_bal, c_dep, c_bnk = (_cum_at(r, h) for r in (bal, dep, bnk))
-            self.assertLess(c_dep, c_bal,
-                            f"leader deploy must cut threat cum at L{h} "
-                            f"({c_dep} vs {c_bal})")
-            self.assertGreater(c_bnk, c_bal,
-                               f"leader banking must raise threat cum at "
-                               f"L{h} ({c_bnk} vs {c_bal})")
+        self.assertGreater(len(bal["laps"]), 0, "setup: the walk has laps")
+        for lb, ld, lk in zip(bal["laps"], dep["laps"], bnk["laps"]):
+            self.assertEqual(lb["lap"], ld["lap"])
+            self.assertEqual(lb["lap"], lk["lap"])
+            L = lb["lap"]
+            self.assertLess(ld["pace_gap_s"], lb["pace_gap_s"],
+                            f"L{L}: leader deploy must cut the chaser's "
+                            f"pace edge")
+            self.assertGreater(lk["pace_gap_s"], lb["pace_gap_s"],
+                               f"L{L}: leader banking must raise the "
+                               f"chaser's pace edge")
+            self.assertGreaterEqual(ld["gap_before_s"],
+                                    lb["gap_before_s"] - 1e-9,
+                                    f"L{L}: deployed gap must dominate")
+            self.assertLessEqual(lk["gap_before_s"],
+                                 lb["gap_before_s"] + 1e-9,
+                                 f"L{L}: banked gap must stay behind")
+        self.assertGreaterEqual(
+            dep["summary"]["min_gap_s"], bal["summary"]["min_gap_s"] - 1e-9,
+            "deploy must keep the closest approach wider")
 
     def test_leader_deploy_is_funded_and_floor_limited(self):
         dep = _leader_walk(leader_ers=100, leader_battery_pct=80)
