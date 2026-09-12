@@ -1,460 +1,569 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>F1 Digital Pit Wall</title>
-    <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Russo+One&family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="/static/css/dashboard.css">
     </style>
 </head>
+
 <body>
 
-<!-- Live badge above red line -->
-<div style="position:sticky;top:0;z-index:201;display:flex;justify-content:flex-end;padding:0 24px;">
-    <div class="f1-live-badge standby" style="margin-top:-18px;border-radius:0 0 4px 4px;">
-        <div class="f1-live-dot"></div>
-        <span class="f1-live-text">STANDBY</span>
-    </div>
-</div>
-
-<div class="f1-header">
-    <a class="f1-logo" href="/" title="F1 Digital Pit Wall">
-        <img src="/static/f1-logo.png" alt="F1">
-    </a>
-    <a class="fia-badge" href="https://www.fia.com" title="FIA" target="_blank">
-        <img src="/static/fia-logo.svg" alt="FIA">
-    </a>
-
-    <nav class="f1-nav">
-        <button class="f1-nav-btn active" onclick="switchTab('dashboard',this)">Dashboard</button>
-        <button class="f1-nav-btn" onclick="switchTab('predict',this)">Lap Predictor</button>
-        <button class="f1-nav-btn" onclick="switchTab('strategy',this)">Strategy Advisor</button>
-        <button class="f1-nav-btn" onclick="switchTab('whatif',this)">Hammer Time</button>
-        <button class="f1-nav-btn" onclick="switchTab('drivers',this)">Drivers</button>
-    </nav>
-
-    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode" id="theme-btn">SUN</button>
-</div>
-
-<!-- INFO BAR -->
-<div class="f1-infobar">
-    <div class="f1-infobar-left">
-        <div class="f1-round-info" id="f1-round">R<span id="f1-round-num">---</span> <span>|</span> <span id="f1-date-range">---</span></div>
-        <div class="f1-circuit-banner">
-            <span class="f1-flag" id="f1-flag"></span>
-            <span class="f1-circuit-name" id="f1-circuit-name">Select a session</span>
-            <span class="f1-circuit-arrow">&#8250;</span>
+    <!-- Live badge above red line -->
+    <div style="position:sticky;top:0;z-index:201;display:flex;justify-content:flex-end;padding:0 24px;">
+        <div class="f1-live-badge standby" style="margin-top:-18px;border-radius:0 0 4px 4px;">
+            <div class="f1-live-dot"></div>
+            <span class="f1-live-text">STANDBY</span>
         </div>
     </div>
-    <div class="f1-infobar-right">
-        <div class="f1-clock-group">
-            <div class="f1-clock">
-                <span class="f1-clock-label">My Time</span>
-                <span class="f1-clock-value" id="f1-my-time">--:--</span>
+
+    <div class="f1-header">
+        <a class="f1-logo" href="/" title="F1 Digital Pit Wall">
+            <img src="/static/f1-logo.png" alt="F1">
+        </a>
+        <a class="fia-badge" href="https://www.fia.com" title="FIA" target="_blank">
+            <img src="/static/fia-logo.svg" alt="FIA">
+        </a>
+
+        <nav class="f1-nav">
+            <button class="f1-nav-btn active" onclick="switchTab('dashboard',this)">Dashboard</button>
+            <button class="f1-nav-btn" onclick="switchTab('predict',this)">Lap Predictor</button>
+            <button class="f1-nav-btn" onclick="switchTab('strategy',this)">Strategy Advisor</button>
+            <button class="f1-nav-btn" onclick="switchTab('whatif',this)">Hammer Time</button>
+            <button class="f1-nav-btn" onclick="switchTab('drivers',this)">Drivers</button>
+        </nav>
+
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode" id="theme-btn">SUN</button>
+    </div>
+
+    <!-- INFO BAR -->
+    <div class="f1-infobar">
+        <div class="f1-infobar-left">
+            <div class="f1-round-info" id="f1-round">R<span id="f1-round-num">---</span> <span>|</span> <span
+                    id="f1-date-range">---</span></div>
+            <div class="f1-circuit-banner">
+                <span class="f1-flag" id="f1-flag"></span>
+                <span class="f1-circuit-name" id="f1-circuit-name">Select a session</span>
+                <span class="f1-circuit-arrow">&#8250;</span>
             </div>
-            <div class="f1-clock-icon"></div>
         </div>
-    </div>
-</div>
-
-<!-- MAIN CONTENT -->
-<div class="main-content">
-
-<!-- TAB: DASHBOARD -->
-<div id="tab-dashboard" class="tab-panel active">
-    <div class="stats-bar">
-        <div class="stat-card">
-            <div class="stat-label">Current Last Lap</div>
-            <div class="stat-value" id="stat-laptime">--:--.---</div>
-        </div>
-        <div class="stat-card gold">
-            <div class="stat-label">Current Fastest</div>
-            <div class="stat-value gold-val" id="stat-fastest">--:--.---</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Current Track</div>
-            <div class="stat-value" id="stat-track">---</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Tyre Compound</div>
-            <div class="stat-value" id="stat-tyre">---</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Lap Number</div>
-            <div class="stat-value" id="stat-lap">--</div>
-        </div>
-    </div>
-
-    <div class="cal-year-row" id="cal-year-row">
-        <button class="calendar-toggle-btn" data-year="2020" onclick="selectCalendarYear(2020)">2020</button>
-        <button class="calendar-toggle-btn" data-year="2021" onclick="selectCalendarYear(2021)">2021</button>
-        <button class="calendar-toggle-btn" data-year="2022" onclick="selectCalendarYear(2022)">2022</button>
-        <button class="calendar-toggle-btn" data-year="2023" onclick="selectCalendarYear(2023)">2023</button>
-        <button class="calendar-toggle-btn" data-year="2024" onclick="selectCalendarYear(2024)">2024</button>
-        <button class="calendar-toggle-btn" data-year="2025" onclick="selectCalendarYear(2025)">2025</button>
-        <button class="calendar-toggle-btn" data-year="2026" onclick="selectCalendarYear(2026)">2026</button>
-    </div>
-    <div class="race-calendar" id="race-calendar">
-        <div class="race-calendar-inner">
-            <div class="race-calendar-header"><span class="cal-year" id="cal-year-label">2026</span> FIA Formula One World Championship</div>
-            <div class="cal-grid" id="cal-grid"></div>
-            <div class="cal-legend">● round has race data in the DB (drivers · best lap) &nbsp;·&nbsp; dimmed = no DB session for that round &nbsp;·&nbsp; click a round to load its sessions + preselect the P0 what-if</div>
-        </div>
-    </div>
-
-    <div class="session-info-bar" id="session-info-bar">
-        <div class="info-cell">
-            <div class="info-cell-lbl">Session Track</div>
-            <div class="info-cell-val" id="info-track">---</div>
-        </div>
-        <div class="info-cell">
-            <div class="info-cell-lbl">Fastest Lap</div>
-            <div class="info-cell-val gold-val" id="info-fastest">---</div>
-        </div>
-        <div class="info-cell">
-            <div class="info-cell-lbl">Last Lap</div>
-            <div class="info-cell-val" id="info-lastlap">---</div>
-        </div>
-        <div class="info-cell">
-            <div class="info-cell-lbl">Tyre Used</div>
-            <div class="info-cell-val" id="info-tyre">---</div>
-        </div>
-    </div>
-
-    <div class="dash-layout">
-        <div>
-            <div class="chart-card">
-                <div class="chart-title">Energy Management <span style="opacity:0.45;font-weight:400">(synthetic ERS)</span></div>
-                <div class="es-bar" id="energySimBar" style="display:none">
-                    <span class="es-lbl">SIMULATE</span>
-                    <button class="es-btn" data-mode="balanced"  onclick="simEnergy('balanced')">BALANCED</button>
-                    <button class="es-btn" data-mode="push"      onclick="simEnergy('push')">PUSH</button>
-                    <button class="es-btn" data-mode="liftcoast" onclick="simEnergy('liftcoast')">LIFT &amp; COAST</button>
-                    <span class="es-msg" id="energySimMsg"></span>
+        <div class="f1-infobar-right">
+            <div class="f1-clock-group">
+                <div class="f1-clock">
+                    <span class="f1-clock-label">My Time</span>
+                    <span class="f1-clock-value" id="f1-my-time">--:--</span>
                 </div>
-                <div id="energyNoData" class="no-data">SELECT A SESSION</div>
-                <canvas id="energyChart" style="display:none"></canvas>
-                <div class="chart-note" id="energyChartNote" style="display:none">Synthetic battery-% tracking line — reconstructed within each lap from the telemetry samples: it drops as energy is deployed (full throttle) and rises as it is harvested (braking / lift-off). The battery starts the race FULL (100% = the 4 MJ usable Energy Store, so 1% = 0.04 MJ) and the opening laps burn it down into the working band — a full store cannot accept regeneration. The dashed 30% / 80% guides are a soft band, not a barrier: steady laps mostly cycle between them, but faster-than-average laps spend stored energy and can dip below 30%, while slower / management laps bank energy and can climb above 80%. Deploy / recover flow is modelled at up to 120 kW = 0.12 MJ/s. Per-lap totals from scripts/energy_simulator.py. <b style="color:#ff9f43">The shaded envelope around the line is the SOC uncertainty band</b> — the battery is not broadcast by F1, it is a synthesized estimate (±2% at the simulator's last write, growing ±0.5%/lap, capped ±8%), so the estimate admits its own error instead of showing fake point precision.</div>
-            </div>
-            <div class="chart-card">
-                <div class="chart-title">Lap Time Progression</div>
-                <div id="lapNoData" class="no-data">SELECT A SESSION</div>
-                <canvas id="lapChart" style="display:none"></canvas>
-            </div>
-            <div class="chart-card">
-                <div class="chart-title">Tyre Degradation — Health</div>
-                <div id="tyreNoData" class="no-data">SELECT A SESSION</div>
-                <div class="tyre-legend" id="tyreLegend" style="display:none"><span class="tl-lbl">COMPOUND</span><span class="tl-item"><span class="tl-dot" style="background:#ff4444"></span>SOFT</span><span class="tl-item"><span class="tl-dot" style="background:#ffd700"></span>MEDIUM</span><span class="tl-item"><span class="tl-dot" style="background:#f5f5f5"></span>HARD</span><span class="tl-item"><span class="tl-dot" style="background:#00c853"></span>INTER</span><span class="tl-item"><span class="tl-dot" style="background:#1e88e5"></span>WET</span><span class="tl-item tl-pit">◆ PIT</span></div>
-                <canvas id="tyreChart" style="display:none"></canvas>
-                <div class="chart-note" id="tyreChartNote" style="display:none">Pirelli-style tyre-health model (scripts/tyre_degradation.py): 100% on a fresh set, declining <b>linearly</b> at the <b>per-track measured</b> loss rate — measured from stored race stints (scripts/measure_tyre_wear.py: within-stint lap drift, fuel-corrected, shrunk toward the Pirelli base — Soft ≈ 4.5% · Medium ≈ 2.25% · Hard ≈ 1.35% /lap). Abrasive venues (Bahrain, Barcelona) burn tyres ~1.4× the fleet average; smooth ones (Monaco, Silverstone) ~0.7×. The gold band is the <b>pit window</b> (40–50% health) — teams stop 1–2 laps before the performance cliff below it. The curve <b>ends</b> (gaps) at the 10% extreme-gamble floor — a real stint never sits there, because teams pit before the cliff. Gold diamonds = pit laps — a stop resets the curve. Sources: Pirelli race notes · Flow Racers · F1 Chronicle · measured stints.</div>
+                <div class="f1-clock-icon"></div>
             </div>
         </div>
-        <div>
-            <div class="chart-card" style="height:100%">
-                <div class="sidebar-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>Recent Sessions</span><span id="sessions-mode" onclick="resetRecentSessions()" title="Back to the most recent sessions in the database" style="display:none;font-size:0.6em;color:var(--red);cursor:pointer;font-family:'Share Tech Mono',monospace;letter-spacing:1px;white-space:nowrap"></span></div>
-                <div class="field" style="margin-top:10px">
-                    <label>Driver</label>
-                    <select id="dash-driver" onchange="onDashboardDriverChange()">
-                        <option value="">All drivers</option>
-                    </select>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
+
+        <!-- TAB: DASHBOARD -->
+        <div id="tab-dashboard" class="tab-panel active">
+            <div class="stats-bar">
+                <div class="stat-card">
+                    <div class="stat-label">Current Last Lap</div>
+                    <div class="stat-value" id="stat-laptime">--:--.---</div>
                 </div>
-                <div id="sessions-list">
-                    <div class="no-data" style="height:120px">LOADING...</div>
+                <div class="stat-card gold">
+                    <div class="stat-label">Current Fastest</div>
+                    <div class="stat-value gold-val" id="stat-fastest">--:--.---</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Current Track</div>
+                    <div class="stat-value" id="stat-track">---</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Tyre Compound</div>
+                    <div class="stat-value" id="stat-tyre">---</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Lap Number</div>
+                    <div class="stat-value" id="stat-lap">--</div>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
 
-<!-- TAB: LAP PREDICTOR -->
-<div id="tab-predict" class="tab-panel">
-    <div class="two-col">
-        <div class="panel red">
-            <div class="panel-title">Race Conditions</div>
-            <div class="field">
-                <label>Tyre Age (laps)</label>
-                <input type="number" id="p-age" min="0" max="60" placeholder="e.g. 12">
+            <div class="cal-year-row" id="cal-year-row">
+                <button class="calendar-toggle-btn" data-year="2020" onclick="selectCalendarYear(2020)">2020</button>
+                <button class="calendar-toggle-btn" data-year="2021" onclick="selectCalendarYear(2021)">2021</button>
+                <button class="calendar-toggle-btn" data-year="2022" onclick="selectCalendarYear(2022)">2022</button>
+                <button class="calendar-toggle-btn" data-year="2023" onclick="selectCalendarYear(2023)">2023</button>
+                <button class="calendar-toggle-btn" data-year="2024" onclick="selectCalendarYear(2024)">2024</button>
+                <button class="calendar-toggle-btn" data-year="2025" onclick="selectCalendarYear(2025)">2025</button>
+                <button class="calendar-toggle-btn" data-year="2026" onclick="selectCalendarYear(2026)">2026</button>
             </div>
-            <div class="field">
-                <label>Lap Number</label>
-                <input type="number" id="p-lap-number" min="0" max="80" step="1" placeholder="e.g. 12">
-            </div>
-            <div class="field">
-                <label>Tyre Compound</label>
-                <div class="opt-grid" id="p-tyre-grid">
-                    <div style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">Loading model...</div>
+            <div class="race-calendar" id="race-calendar">
+                <div class="race-calendar-inner">
+                    <div class="race-calendar-header"><span class="cal-year" id="cal-year-label">2026</span> FIA Formula
+                        One World Championship</div>
+                    <div class="cal-grid" id="cal-grid"></div>
+                    <div class="cal-legend">● round has race data in the DB (drivers · best lap) &nbsp;·&nbsp; dimmed =
+                        no DB session for that round &nbsp;·&nbsp; click a round to load its sessions + preselect the P0
+                        what-if</div>
                 </div>
             </div>
-            <div class="field">
-                <label>Track</label>
-                <div class="opt-grid" id="p-track-grid">
-                    <div style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">Loading model...</div>
+
+            <div class="session-info-bar" id="session-info-bar">
+                <div class="info-cell">
+                    <div class="info-cell-lbl">Session Track</div>
+                    <div class="info-cell-val" id="info-track">---</div>
+                </div>
+                <div class="info-cell">
+                    <div class="info-cell-lbl">Fastest Lap</div>
+                    <div class="info-cell-val gold-val" id="info-fastest">---</div>
+                </div>
+                <div class="info-cell">
+                    <div class="info-cell-lbl">Last Lap</div>
+                    <div class="info-cell-val" id="info-lastlap">---</div>
+                </div>
+                <div class="info-cell">
+                    <div class="info-cell-lbl">Tyre Used</div>
+                    <div class="info-cell-val" id="info-tyre">---</div>
                 </div>
             </div>
-            <button class="action-btn" id="predict-btn" onclick="runPredict()">PREDICT LAP TIME</button>
-            <div class="err-box" id="predict-err"></div>
-        </div>
-        <div class="panel teal">
-            <div class="panel-title">Prediction Result</div>
-            <div class="result-empty" id="result-empty">
-                <div class="icon">///</div>
-                <p>SET CONDITIONS &amp; PREDICT</p>
-            </div>
-            <div class="result-content" id="result-content">
-                <div class="result-time-wrap">
-                    <div class="result-lbl">PREDICTED LAP TIME</div>
-                    <div class="result-time" id="result-time">-:--.---</div>
-                    <div class="result-secs" id="result-secs"></div>
-                </div>
-                <div class="result-grid">
-                    <div class="result-cell">
-                        <div class="result-cell-lbl">Track</div>
-                        <div class="result-cell-val" id="res-track">---</div>
+
+            <div class="dash-layout">
+                <div>
+                    <div class="chart-card">
+                        <div class="chart-title">Energy Management <span style="opacity:0.45;font-weight:400">(synthetic
+                                ERS)</span></div>
+                        <div class="es-bar" id="energySimBar" style="display:none">
+                            <span class="es-lbl">SIMULATE</span>
+                            <button class="es-btn" data-mode="balanced"
+                                onclick="simEnergy('balanced')">BALANCED</button>
+                            <button class="es-btn" data-mode="push" onclick="simEnergy('push')">PUSH</button>
+                            <button class="es-btn" data-mode="liftcoast" onclick="simEnergy('liftcoast')">LIFT &amp;
+                                COAST</button>
+                            <span class="es-msg" id="energySimMsg"></span>
+                        </div>
+                        <div id="energyNoData" class="no-data">SELECT A SESSION</div>
+                        <canvas id="energyChart" style="display:none"></canvas>
+                        <div class="chart-note" id="energyChartNote" style="display:none">Synthetic battery-% tracking
+                            line — reconstructed within each lap from the telemetry samples: it drops as energy is
+                            deployed (full throttle) and rises as it is harvested (braking / lift-off). The battery
+                            starts the race FULL (100% = the 4 MJ usable Energy Store, so 1% = 0.04 MJ) and the opening
+                            laps burn it down into the working band — a full store cannot accept regeneration. The
+                            dashed 30% / 80% guides are a soft band, not a barrier: steady laps mostly cycle between
+                            them, but faster-than-average laps spend stored energy and can dip below 30%, while slower /
+                            management laps bank energy and can climb above 80%. Deploy / recover flow is modelled at up
+                            to 120 kW = 0.12 MJ/s. Per-lap totals from scripts/energy_simulator.py. <b
+                                style="color:#ff9f43">The shaded envelope around the line is the SOC uncertainty
+                                band</b> — the battery is not broadcast by F1, it is a synthesized estimate (±2% at the
+                            simulator's last write, growing ±0.5%/lap, capped ±8%), so the estimate admits its own error
+                            instead of showing fake point precision.</div>
                     </div>
-                    <div class="result-cell">
-                        <div class="result-cell-lbl">Tyre</div>
-                        <div class="result-cell-val" id="res-tyre">---</div>
+                    <div class="chart-card">
+                        <div class="chart-title">Lap Time Progression</div>
+                        <div id="lapNoData" class="no-data">SELECT A SESSION</div>
+                        <canvas id="lapChart" style="display:none"></canvas>
                     </div>
-                    <div class="result-cell">
-                        <div class="result-cell-lbl">Tyre Age</div>
-                        <div class="result-cell-val" id="res-age">---</div>
+                    <div class="chart-card">
+                        <div class="chart-title">Tyre Degradation — Health</div>
+                        <div id="tyreNoData" class="no-data">SELECT A SESSION</div>
+                        <div class="tyre-legend" id="tyreLegend" style="display:none"><span
+                                class="tl-lbl">COMPOUND</span><span class="tl-item"><span class="tl-dot"
+                                    style="background:#ff4444"></span>SOFT</span><span class="tl-item"><span
+                                    class="tl-dot" style="background:#ffd700"></span>MEDIUM</span><span
+                                class="tl-item"><span class="tl-dot" style="background:#f5f5f5"></span>HARD</span><span
+                                class="tl-item"><span class="tl-dot" style="background:#00c853"></span>INTER</span><span
+                                class="tl-item"><span class="tl-dot" style="background:#1e88e5"></span>WET</span><span
+                                class="tl-item tl-pit">◆ PIT</span></div>
+                        <canvas id="tyreChart" style="display:none"></canvas>
+                        <div class="chart-note" id="tyreChartNote" style="display:none">Pirelli-style tyre-health model
+                            (scripts/tyre_degradation.py): 100% on a fresh set, declining <b>linearly</b> at the
+                            <b>per-track measured</b> loss rate — measured from stored race stints
+                            (scripts/measure_tyre_wear.py: within-stint lap drift, fuel-corrected, shrunk toward the
+                            Pirelli base — Soft ≈ 4.5% · Medium ≈ 2.25% · Hard ≈ 1.35% /lap). Abrasive venues (Bahrain,
+                            Barcelona) burn tyres ~1.4× the fleet average; smooth ones (Monaco, Silverstone) ~0.7×. The
+                            gold band is the <b>pit window</b> (40–50% health) — teams stop 1–2 laps before the
+                            performance cliff below it. The curve <b>ends</b> (gaps) at the 10% extreme-gamble floor — a
+                            real stint never sits there, because teams pit before the cliff. Gold diamonds = pit laps —
+                            a stop resets the curve. Sources: Pirelli race notes · Flow Racers · F1 Chronicle · measured
+                            stints.</div>
                     </div>
-                    <div class="result-cell">
-                        <div class="result-cell-lbl">Est. Fuel</div>
-                        <div class="result-cell-val" id="res-fuel">---</div>
+                </div>
+                <div>
+                    <div class="chart-card" style="height:100%">
+                        <div class="sidebar-title"
+                            style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>Recent
+                                Sessions</span><span id="sessions-mode" onclick="resetRecentSessions()"
+                                title="Back to the most recent sessions in the database"
+                                style="display:none;font-size:0.6em;color:var(--red);cursor:pointer;font-family:'Share Tech Mono',monospace;letter-spacing:1px;white-space:nowrap"></span>
+                        </div>
+                        <div class="field" style="margin-top:10px">
+                            <label>Driver</label>
+                            <select id="dash-driver" onchange="onDashboardDriverChange()">
+                                <option value="">All drivers</option>
+                            </select>
+                        </div>
+                        <div id="sessions-list">
+                            <div class="no-data" style="height:120px">LOADING...</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-</div>
 
-<!-- TAB: STRATEGY ADVISOR -->
-<div id="tab-strategy" class="tab-panel">
-    <div class="two-col">
-        <div class="panel red">
-            <div class="panel-title">Current Race Situation</div>
-            <div class="two-col" style="gap:12px;margin-bottom:0">
-                <div class="field">
-                    <label>Current Lap</label>
-                    <input type="number" id="s-curlap" min="1" value="15">
-                </div>
-                <div class="field">
-                    <label>Total Laps</label>
-                    <input type="number" id="s-totlaps" min="1" value="50">
-                </div>
-            </div>
-            <div class="field">
-                <label>Current Tyre Age (laps)</label>
-                <input type="number" id="s-age" min="0" value="10">
-            </div>
-            <div class="field">
-                <label>Current Tyre Compound</label>
-                <div class="opt-grid" id="s-tyre-grid">
-                    <div style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">Loading model...</div>
-                </div>
-            </div>
-            <div class="field">
-                <label>Track</label>
-                <div class="opt-grid" id="s-track-grid">
-                    <div style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">Loading model...</div>
-                </div>
-            </div>
-            <div class="field">
-                <label>Race Event</label>
-                <div class="event-grid">
-                    <div class="event-btn" id="ev-VSC" onclick="selectEvent('VSC')">
-                        <div class="event-icon" style="color:#ffd700;">///</div>
-                        <div class="event-lbl">VSC</div>
+        <!-- TAB: LAP PREDICTOR -->
+        <div id="tab-predict" class="tab-panel">
+            <div class="two-col">
+                <div class="panel red">
+                    <div class="panel-title">Race Conditions</div>
+                    <div class="field">
+                        <label>Tyre Age (laps)</label>
+                        <input type="number" id="p-age" min="0" max="60" placeholder="e.g. 12">
                     </div>
-                    <div class="event-btn" id="ev-SafetyCar" onclick="selectEvent('SafetyCar')">
-                        <div class="event-icon" style="color:#fff;">SC</div>
-                        <div class="event-lbl">Safety Car</div>
+                    <div class="field">
+                        <label>Lap Number</label>
+                        <input type="number" id="p-lap-number" min="0" max="80" step="1" placeholder="e.g. 12">
                     </div>
-                    <div class="event-btn" id="ev-Rain" onclick="selectEvent('Rain')">
-                        <div class="event-icon" style="color:#4fc3f7;">~</div>
-                        <div class="event-lbl">Rain</div>
+                    <div class="field">
+                        <label>Tyre Compound</label>
+                        <div class="opt-grid" id="p-tyre-grid">
+                            <div
+                                style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">
+                                Loading model...</div>
+                        </div>
                     </div>
-                    <div class="event-btn" id="ev-Crash" onclick="selectEvent('Crash')">
-                        <div class="event-icon" style="color:#ff4444;">X</div>
-                        <div class="event-lbl">Incident / Crash</div>
+                    <div class="field">
+                        <label>Track</label>
+                        <div class="opt-grid" id="p-track-grid">
+                            <div
+                                style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">
+                                Loading model...</div>
+                        </div>
                     </div>
-                    <div class="event-btn" id="ev-RedFlag" onclick="selectEvent('RedFlag')">
-                        <div class="event-icon" style="color:#ff6b6b;">RF</div>
-                        <div class="event-lbl">Red Flag</div>
+                    <button class="action-btn" id="predict-btn" onclick="runPredict()">PREDICT LAP TIME</button>
+                    <div class="err-box" id="predict-err"></div>
+                </div>
+                <div class="panel teal">
+                    <div class="panel-title">Prediction Result</div>
+                    <div class="result-empty" id="result-empty">
+                        <div class="icon">///</div>
+                        <p>SET CONDITIONS &amp; PREDICT</p>
+                    </div>
+                    <div class="result-content" id="result-content">
+                        <div class="result-time-wrap">
+                            <div class="result-lbl">PREDICTED LAP TIME</div>
+                            <div class="result-time" id="result-time">-:--.---</div>
+                            <div class="result-secs" id="result-secs"></div>
+                        </div>
+                        <div class="result-grid">
+                            <div class="result-cell">
+                                <div class="result-cell-lbl">Track</div>
+                                <div class="result-cell-val" id="res-track">---</div>
+                            </div>
+                            <div class="result-cell">
+                                <div class="result-cell-lbl">Tyre</div>
+                                <div class="result-cell-val" id="res-tyre">---</div>
+                            </div>
+                            <div class="result-cell">
+                                <div class="result-cell-lbl">Tyre Age</div>
+                                <div class="result-cell-val" id="res-age">---</div>
+                            </div>
+                            <div class="result-cell">
+                                <div class="result-cell-lbl">Est. Fuel</div>
+                                <div class="result-cell-val" id="res-fuel">---</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="two-col" style="gap:12px;margin-bottom:0">
-                <div class="field">
-                    <label>Session ID (optional — set inventory)</label>
-                    <input type="number" id="s-session" min="0" placeholder="e.g. 78">
-                </div>
-                <div class="field">
-                    <label>Driver (optional — HAM / VER)</label>
-                    <input type="text" id="s-driver" placeholder="HAM">
-                </div>
-            </div>
-            <div class="two-col" style="gap:12px;margin-bottom:0">
-                <div class="field">
-                    <label>Gap to car ahead (s, optional)</label>
-                    <input type="number" id="s-gap" step="0.1" placeholder="e.g. 2.4 (negative = you lead)">
-                </div>
-                <div class="field">
-                    <label>Rejoin traffic (pit-loss modifier)</label>
-                    <select id="s-traffic">
-                        <option value="Light" selected>Light</option>
-                        <option value="Clear">Clear</option>
-                        <option value="Heavy">Heavy</option>
-                    </select>
-                </div>
-            </div>
-            <div class="field">
-                <label>Season Year (optional — era pace level)</label>
-                <input type="number" id="s-year" min="2018" max="2030" placeholder="e.g. 2024 (blank = default era)">
-            </div>
-            <button class="action-btn" onclick="runStrategy()">ANALYZE STRATEGY</button>
-            <div class="err-box" id="strategy-err"></div>
         </div>
-        <div class="panel teal">
-            <div class="panel-title">Strategy Options</div>
-            <div class="strat-empty" id="strat-empty">
-                <div class="icon">///</div>
-                <p>FILL IN RACE SITUATION<br>SELECT AN EVENT<br>THEN ANALYZE</p>
-            </div>
-            <div class="strat-result" id="strat-result">
-                <div id="strat-options"></div>
-                <div class="strat-recommend" id="strat-rec"></div>
-            </div>
-        </div>
-    </div>
 
-</div>
-
-<!-- TAB: HAMMER TIME (what-if tab) -->
-<div id="tab-whatif" class="tab-panel">
-
-    <!-- RACE CONTEXT BAR — the situation being analysed, always visible -->
-    <div class="ctx-bar" id="ht-ctxbar">
-        <div class="ctx-main">
-            <span class="ctx-battle" id="ctx-battle">— → —</span>
-            <span class="ctx-meta" id="ctx-meta">PICK A SCENARIO</span>
-        </div>
-        <div class="ctx-chips">
-            <span class="ctx-chip" id="ctx-gap" title="Gap from the chaser to the car ahead">GAP —</span>
-            <span class="ctx-chip" id="ctx-tyres" title="What each car is on right now">TYRES — / —</span>
-            <span class="ctx-chip" id="ctx-batt" title="Chaser battery — blank = working-band default">BATT AUTO</span>
-        </div>
-        <div class="ctx-actions">
-            <button type="button" class="model-chip" id="ht-model-chip" onclick="htToggleModel()" title="Model health — click for details">MODEL <span class="mc-dot" id="mc-dot">●</span> <span id="mc-word">LOADING</span></button>
-            <button type="button" class="ctx-edit" id="ht-edit-btn" onclick="htEditScenario(this)">EDIT SCENARIO</button>
-        </div>
-        <div class="model-panel" id="ht-model-panel" style="display:none"></div>
-    </div>
-
-    <!-- SCENARIO EDITOR (folded; opens from EDIT SCENARIO in the context bar) -->
-    <div class="ht-mod" id="ht-scenario">
-        <div class="ht-body" style="border-top:0">
-            <div class="grp-label">SCENARIO — WHO, WHERE, WHICH ERA</div>
-            <div class="two-col ht-cols">
-                <div class="field">
-                    <label>Leader (car ahead)</label>
-                    <select id="ov-leader"><option value="">Loading drivers...</option></select>
+        <!-- TAB: STRATEGY ADVISOR -->
+        <div id="tab-strategy" class="tab-panel">
+            <div class="two-col">
+                <div class="panel red">
+                    <div class="panel-title">Current Race Situation</div>
+                    <div class="two-col" style="gap:12px;margin-bottom:0">
+                        <div class="field">
+                            <label>Current Lap</label>
+                            <input type="number" id="s-curlap" min="1" value="15">
+                        </div>
+                        <div class="field">
+                            <label>Total Laps</label>
+                            <input type="number" id="s-totlaps" min="1" value="50">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Current Tyre Age (laps)</label>
+                        <input type="number" id="s-age" min="0" value="10">
+                    </div>
+                    <div class="field">
+                        <label>Current Tyre Compound</label>
+                        <div class="opt-grid" id="s-tyre-grid">
+                            <div
+                                style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">
+                                Loading model...</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Track</label>
+                        <div class="opt-grid" id="s-track-grid">
+                            <div
+                                style="color:var(--muted);font-family:'Share Tech Mono',monospace;font-size:0.72em;padding:8px">
+                                Loading model...</div>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Race Event</label>
+                        <div class="event-grid">
+                            <div class="event-btn" id="ev-VSC" onclick="selectEvent('VSC')">
+                                <div class="event-icon" style="color:#ffd700;">///</div>
+                                <div class="event-lbl">VSC</div>
+                            </div>
+                            <div class="event-btn" id="ev-SafetyCar" onclick="selectEvent('SafetyCar')">
+                                <div class="event-icon" style="color:#fff;">SC</div>
+                                <div class="event-lbl">Safety Car</div>
+                            </div>
+                            <div class="event-btn" id="ev-Rain" onclick="selectEvent('Rain')">
+                                <div class="event-icon" style="color:#4fc3f7;">~</div>
+                                <div class="event-lbl">Rain</div>
+                            </div>
+                            <div class="event-btn" id="ev-Crash" onclick="selectEvent('Crash')">
+                                <div class="event-icon" style="color:#ff4444;">X</div>
+                                <div class="event-lbl">Incident / Crash</div>
+                            </div>
+                            <div class="event-btn" id="ev-RedFlag" onclick="selectEvent('RedFlag')">
+                                <div class="event-icon" style="color:#ff6b6b;">RF</div>
+                                <div class="event-lbl">Red Flag</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="two-col" style="gap:12px;margin-bottom:0">
+                        <div class="field">
+                            <label>Session ID (optional — set inventory)</label>
+                            <input type="number" id="s-session" min="0" placeholder="e.g. 78">
+                        </div>
+                        <div class="field">
+                            <label>Driver (optional — HAM / VER)</label>
+                            <input type="text" id="s-driver" placeholder="HAM">
+                        </div>
+                    </div>
+                    <div class="two-col" style="gap:12px;margin-bottom:0">
+                        <div class="field">
+                            <label>Gap to car ahead (s, optional)</label>
+                            <input type="number" id="s-gap" step="0.1" placeholder="e.g. 2.4 (negative = you lead)">
+                        </div>
+                        <div class="field">
+                            <label>Rejoin traffic (pit-loss modifier)</label>
+                            <select id="s-traffic">
+                                <option value="Light" selected>Light</option>
+                                <option value="Clear">Clear</option>
+                                <option value="Heavy">Heavy</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label>Season Year (optional — era pace level)</label>
+                        <input type="number" id="s-year" min="2018" max="2030"
+                            placeholder="e.g. 2024 (blank = default era)">
+                    </div>
+                    <button class="action-btn" onclick="runStrategy()">ANALYZE STRATEGY</button>
+                    <div class="err-box" id="strategy-err"></div>
                 </div>
-                <div class="field">
-                    <label>Chaser (car behind)</label>
-                    <select id="ov-chaser"><option value="">Loading drivers...</option></select>
-                </div>
-                <div class="field">
-                    <label>Race / Track</label>
-                    <select id="ov-track"><option value="">Loading tracks...</option></select>
-                </div>
-                <div class="field">
-                    <label>Season</label>
-                    <input type="number" id="ov-year" value="2026" title="Era level for the models — the live call always uses each driver's career (aggregate) model, not a stored race">
+                <div class="panel teal">
+                    <div class="panel-title">Strategy Options</div>
+                    <div class="strat-empty" id="strat-empty">
+                        <div class="icon">///</div>
+                        <p>FILL IN RACE SITUATION<br>SELECT AN EVENT<br>THEN ANALYZE</p>
+                    </div>
+                    <div class="strat-result" id="strat-result">
+                        <div id="strat-options"></div>
+                        <div class="strat-recommend" id="strat-rec"></div>
+                    </div>
                 </div>
             </div>
-            <div class="chart-note">A round on the Calendar tab preloads the pair + race. Every section below inherits this scenario.</div>
-        </div>
-    </div>
 
-    <!-- THE CALL — ONE merged decision.  The race projection and the
+        </div>
+
+        <!-- TAB: HAMMER TIME (what-if tab) -->
+        <div id="tab-whatif" class="tab-panel">
+
+            <!-- RACE CONTEXT BAR — the situation being analysed, always visible -->
+            <div class="ctx-bar" id="ht-ctxbar">
+                <div class="ctx-main">
+                    <span class="ctx-battle" id="ctx-battle">— → —</span>
+                    <span class="ctx-meta" id="ctx-meta">PICK A SCENARIO</span>
+                </div>
+                <div class="ctx-chips">
+                    <span class="ctx-chip" id="ctx-gap" title="Gap from the chaser to the car ahead">GAP —</span>
+                    <span class="ctx-chip" id="ctx-tyres" title="What each car is on right now">TYRES — / —</span>
+                    <span class="ctx-chip" id="ctx-batt" title="Chaser battery — blank = working-band default">BATT
+                        AUTO</span>
+                </div>
+                <div class="ctx-actions">
+                    <button type="button" class="model-chip" id="ht-model-chip" onclick="htToggleModel()"
+                        title="Model health — click for details">MODEL <span class="mc-dot" id="mc-dot">●</span> <span
+                            id="mc-word">LOADING</span></button>
+                    <button type="button" class="ctx-edit" id="ht-edit-btn" onclick="htEditScenario(this)">EDIT
+                        SCENARIO</button>
+                </div>
+                <div class="model-panel" id="ht-model-panel" style="display:none"></div>
+            </div>
+
+            <!-- SCENARIO EDITOR (folded; opens from EDIT SCENARIO in the context bar) -->
+            <div class="ht-mod" id="ht-scenario">
+                <div class="ht-body" style="border-top:0">
+                    <div class="grp-label">SCENARIO — WHO, WHERE, WHICH ERA</div>
+                    <div class="two-col ht-cols">
+                        <div class="field">
+                            <label>Leader (car ahead)</label>
+                            <select id="ov-leader">
+                                <option value="">Loading drivers...</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Chaser (car behind)</label>
+                            <select id="ov-chaser">
+                                <option value="">Loading drivers...</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Race / Track</label>
+                            <select id="ov-track">
+                                <option value="">Loading tracks...</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label>Season</label>
+                            <input type="number" id="ov-year" value="2026"
+                                title="Era level for the models — the live call always uses each driver's career (aggregate) model, not a stored race">
+                        </div>
+                    </div>
+                    <div class="chart-note">A round on the Calendar tab preloads the pair + race. Every section below
+                        inherits this scenario.</div>
+
+                    <!-- FASTF1 OVERTAKE TELEMETRY & TRACK MAP -->
+                    <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
+                        <button type="button" class="ht-preset" id="overtake-autofill-btn" onclick="htAutoFillOvertake(this)"
+                            style="background:linear-gradient(90deg, #ff4757, #ffa502); color:#fff; font-weight:700; padding:8px 14px; border-radius:4px; border:none; cursor:pointer;"
+                            title="Auto-fill scenario & load FastF1 overtake telemetry map for 2026 Australian GP (LEC vs RUS)">⚡ AUTO-FILL FROM FASTF1 OVERTAKE</button>
+                        <span id="overtake-sync-status" class="ht-inherit" style="margin:0; font-size:0.85em;"></span>
+                    </div>
+
+                    <div id="ht-overtake-map-container" style="margin-top:16px; background:#0c0f17; border:1px solid #282c37; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #222; padding-bottom:8px; margin-bottom:12px;">
+                            <span style="font-family:'Russo One', sans-serif; color:var(--f1-gold); font-size:0.95rem;">FASTF1 OVERTAKE SPATIAL TELEMETRY & TRACK MAP</span>
+                            <span id="ht-overtake-meta" style="font-family:'Share Tech Mono', monospace; font-size:0.85rem; color:#aaa;">2026 AUSTRALIAN GP · LAP 3</span>
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                            <div style="background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:10px;">
+                                <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Circuit Trajectory & Overtake Point</div>
+                                <img id="ht-img-overtake" src="/static/australian_gp_2026_lec_rus_overtake.png" alt="Overtake Track Map" style="width:100%; border-radius:4px; border:1px solid #333;">
+                            </div>
+                            <div style="background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:10px;">
+                                <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Spatial Separation Profile (m)</div>
+                                <img id="ht-img-distance" src="/static/australian_gp_2026_lec_rus_distance.png" alt="Spatial Separation Profile" style="width:100%; border-radius:4px; border:1px solid #333;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- THE CALL — ONE merged decision.  The race projection and the
          multi-policy tactical engine are the same call now: both seats are
          evaluated, the leader engine's recommended defence conditions the
          posture the attack policies are scored against, and the seat switch
          only chooses whose call is surfaced. -->
-    <div class="ht-mod open" id="ht-call">
-        <div class="ht-hero">
-            <div class="ht-hero-kicker">THE CALL</div>
-            <div class="ht-hero-title">WHAT'S THE CALL?</div>
-            <div class="ht-hero-line" id="ht-hero-line">Pick the two drivers, set the race state, choose whose radio you are on, then make the call.</div>
-        </div>
-        <div class="ht-body" style="border-top:0;padding-top:0">
-            <div class="field" style="margin:0 0 14px">
-                <label>Seat — whose call is this? Both engines always run; the seat picks which one you see (and whose battery the energy fields describe).</label>
-                <div class="po-posture" id="uc-persp">
-                    <button type="button" class="po-persp-btn active" data-perspective="chaser" onclick="ucSetPerspective(this)">CHASER — WE ATTACK</button>
-                    <button type="button" class="po-persp-btn" data-perspective="leader" onclick="ucSetPerspective(this)">LEADER — WE DEFEND</button>
+            <div class="ht-mod open" id="ht-call">
+                <div class="ht-hero">
+                    <div class="ht-hero-kicker">THE CALL</div>
+                    <div class="ht-hero-title">WHAT'S THE CALL?</div>
+                    <div class="ht-hero-line" id="ht-hero-line">Pick the two drivers, set the race state, choose whose
+                        radio you are on, then make the call.</div>
                 </div>
-            </div>
-            <div class="ht-state-grid">
-                <div class="ht-state-grp">
-                    <div class="grp-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">CURRENT RACE STATE
-                        <button type="button" class="ht-preset" id="live-sync-btn" onclick="htLiveSync(this)" title="Fill lap / gap / tyre state from the live telemetry feed (UDP capture). Falls back to the two most recently live drivers.">● LIVE SYNC</button>
-                    </div>
-                    <div class="ht-inherit" id="live-sync-status" style="display:none;margin:0 0 10px"></div>
-                    <div class="field" style="margin:0 0 12px">
-                        <label>Gap delta — <span id="ov-gap-val" style="color:#ffd700">0.8s</span></label>
-                        <div class="call-gap-row">
-                            <input type="range" id="ov-gap" min="0.1" max="20" step="0.1" value="0.8"
-                                   oninput="setGapVal(this.value)">
-                            <span class="call-gap-val" id="ov-gap-side">0.8s</span>
-                        </div>
-                        <div class="ht-presets">
-                            <button type="button" class="ht-preset" onclick="setGapVal(0.5)">0.5s</button>
-                            <button type="button" class="ht-preset" onclick="setGapVal(1.0)">1.0s</button>
-                            <button type="button" class="ht-preset" onclick="setGapVal(1.5)">1.5s</button>
-                            <button type="button" class="ht-preset" onclick="setGapVal(3.0)">3.0s</button>
-                            <button type="button" class="ht-preset" onclick="setGapVal(5.0)">5.0s</button>
+                <div class="ht-body" style="border-top:0;padding-top:0">
+                    <div class="field" style="margin:0 0 14px">
+                        <label>Seat — whose call is this? Both engines always run; the seat picks which one you see (and
+                            whose battery the energy fields describe).</label>
+                        <div class="po-posture" id="uc-persp">
+                            <button type="button" class="po-persp-btn active" data-perspective="chaser"
+                                onclick="ucSetPerspective(this)">CHASER — WE ATTACK</button>
+                            <button type="button" class="po-persp-btn" data-perspective="leader"
+                                onclick="ucSetPerspective(this)">LEADER — WE DEFEND</button>
                         </div>
                     </div>
-                    <div class="two-col ht-cols" style="gap:12px">
-                        <div class="field" style="margin:0">
-                            <label>Current lap</label>
-                            <input type="number" id="ov-lap" min="1" value="1">
+                    <div class="ht-state-grid">
+                        <div class="ht-state-grp">
+                            <div class="grp-label"
+                                style="display:flex;align-items:center;justify-content:space-between;gap:8px">CURRENT
+                                RACE STATE
+                                <button type="button" class="ht-preset" id="live-sync-btn" onclick="htLiveSync(this)"
+                                    title="Fill lap / gap / tyre state from the live telemetry feed (UDP capture). Falls back to the two most recently live drivers.">●
+                                    LIVE SYNC</button>
+                            </div>
+                            <div class="ht-inherit" id="live-sync-status" style="display:none;margin:0 0 10px"></div>
+                            <div class="field" style="margin:0 0 12px">
+                                <label>Gap delta — <span id="ov-gap-val" style="color:#ffd700">0.8s</span></label>
+                                <div class="call-gap-row">
+                                    <input type="range" id="ov-gap" min="0.1" max="20" step="0.1" value="0.8"
+                                        oninput="setGapVal(this.value)">
+                                    <span class="call-gap-val" id="ov-gap-side">0.8s</span>
+                                </div>
+                                <div class="ht-presets">
+                                    <button type="button" class="ht-preset" onclick="setGapVal(0.5)">0.5s</button>
+                                    <button type="button" class="ht-preset" onclick="setGapVal(1.0)">1.0s</button>
+                                    <button type="button" class="ht-preset" onclick="setGapVal(1.5)">1.5s</button>
+                                    <button type="button" class="ht-preset" onclick="setGapVal(3.0)">3.0s</button>
+                                    <button type="button" class="ht-preset" onclick="setGapVal(5.0)">5.0s</button>
+                                </div>
+                            </div>
+                            <div class="two-col ht-cols" style="gap:12px">
+                                <div class="field" style="margin:0">
+                                    <label>Current lap</label>
+                                    <input type="number" id="ov-lap" min="1" value="1">
+                                </div>
+                                <div class="field" style="margin:0">
+                                    <label>Race length (laps)</label>
+                                    <input type="number" id="ov-racelaps" min="1" max="130" value="57"
+                                        title="Total laps of this race — the projection horizon to the flag">
+                                </div>
+                            </div>
                         </div>
-                        <div class="field" style="margin:0">
-                            <label>Race length (laps)</label>
-                            <input type="number" id="ov-racelaps" min="1" max="130" value="57" title="Total laps of this race — the projection horizon to the flag">
+                        <div class="ht-state-grp">
+                            <div class="grp-label">TYRE STATE — RIGHT NOW</div>
+                            <div class="two-col ht-cols" style="gap:12px;margin-bottom:14px">
+                                <div class="field" style="margin:0"><label>Leader tyre compound</label><select
+                                        id="ov-ltyre"></select></div>
+                                <div class="field" style="margin:0"><label>Leader tyre age (laps)</label><input
+                                        type="number" id="ov-lage" min="0" value="12"></div>
+                            </div>
+                            <div class="two-col ht-cols" style="gap:12px">
+                                <div class="field" style="margin:0"><label>Chaser tyre compound</label><select
+                                        id="ov-ctyre"></select></div>
+                                <div class="field" style="margin:0"><label>Chaser tyre age (laps)</label><input
+                                        type="number" id="ov-cage" min="0" value="8"></div>
+                            </div>
                         </div>
-                    </div>
-                </div>
-                <div class="ht-state-grp">
-                    <div class="grp-label">TYRE STATE — RIGHT NOW</div>
-                    <div class="two-col ht-cols" style="gap:12px;margin-bottom:14px">
-                        <div class="field" style="margin:0"><label>Leader tyre compound</label><select id="ov-ltyre"></select></div>
-                        <div class="field" style="margin:0"><label>Leader tyre age (laps)</label><input type="number" id="ov-lage" min="0" value="12"></div>
-                    </div>
-                    <div class="two-col ht-cols" style="gap:12px">
-                        <div class="field" style="margin:0"><label>Chaser tyre compound</label><select id="ov-ctyre"></select></div>
-                        <div class="field" style="margin:0"><label>Chaser tyre age (laps)</label><input type="number" id="ov-cage" min="0" value="8"></div>
-                    </div>
-                </div>
-                <div class="ht-state-grp">
-                    <div class="grp-label">ENERGY &amp; RESERVE</div>
-                    <div class="field" style="margin:0 0 12px">
-                        <label for="ov-ers-batt" id="uc-batt-label">Our battery now (MJ of the 4.0 MJ store)</label>
-                        <input type="number" id="ov-ers-batt" min="0" max="4" step="0.1" value="" placeholder="blank = ~62% band"
-                               title="The battery of the car whose seat is selected, in MJ of the 4.0 MJ store — blank uses the mid-race working band (~62%). Deploy draws it down to the 30% floor; bank tops out at a full store.">
-                    </div>
-                    <div class="field" style="margin:0 0 12px">
-                        <label>Reserve target (% of store — policies below it are rejected)</label>
-                        <input type="number" id="uc-reserve" min="10" max="100" step="5" value="40">
-                    </div>
-                    <div class="field" id="uc-threat-wrap" style="margin:0;display:none">
-                        <label>Threat battery (MJ — the attacking car, leader seat only)</label>
-                        <input type="number" id="uc-threat-batt" min="0" max="4" step="0.1" placeholder="blank = ~62% band">
+                        <div class="ht-state-grp">
+                            <div class="grp-label">ENERGY &amp; RESERVE</div>
+                            <div class="field" style="margin:0 0 12px">
+                                <label for="ov-ers-batt" id="uc-batt-label">Our battery now (MJ of the 4.0 MJ
+                                    store)</label>
+                                <input type="number" id="ov-ers-batt" min="0" max="4" step="0.1" value=""
+                                    placeholder="blank = ~62% band"
+                                    title="The battery of the car whose seat is selected, in MJ of the 4.0 MJ store — blank uses the mid-race working band (~62%). Deploy draws it down to the 30% floor; bank tops out at a full store.">
+                            </div>
+                            <div class="field" style="margin:0 0 12px">
+                                <label>Reserve target (% of store — policies below it are rejected)</label>
+                                <input type="number" id="uc-reserve" min="10" max="100" step="5" value="40">
+                            </div>
+                            <div class="field" id="uc-threat-wrap" style="margin:0;display:none">
+                                <label>Threat battery (MJ — the attacking car, leader seat only)</label>
+                                <input type="number" id="uc-threat-batt" min="0" max="4" step="0.1"
+                                    placeholder="blank = ~62% band">
+                            </div>
+                        </div>
                     </div>
                     <div class="field" style="margin:12px 0 4px">
                         <label id="uc-shape-label">Our ERS sector shape — the chaser's attack (MJ/lap deploy delta per sector)</label>
@@ -478,357 +587,460 @@
     </div>
 
 
-    <!-- MODULE 02 · FULL-RACE REPLAY (advanced; folded by default) -->
-    <div class="ht-mod" id="ht-fullrace">
-        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-fullrace',this)">
-            <span class="ht-idx">02</span>
-            <span class="ht-titles">
-                <span class="ht-title">Full-Race Replay <span class="ht-adv">ADVANCED</span></span>
-                <span class="ht-sub">Speed-trace replay to the flag · gap &amp; battery trade-off · lap data on demand</span>
-            </span>
-            <span class="ht-chev" aria-hidden="true">▾</span>
-        </button>
-        <div class="ht-body">
-            <div class="two-col ht-cols">
-                <div class="field">
-                    <label>Leader session ID</label>
-                    <input type="number" id="ovr-leader" min="1" placeholder="resolved from drivers above">
-                </div>
-                <div class="field">
-                    <label>Chaser session ID</label>
-                    <input type="number" id="ovr-chaser" min="1" placeholder="resolved from drivers above">
-                </div>
-                <div class="field">
-                    <label>Start lap</label>
-                    <input type="number" id="ovr-start" min="1" value="1">
-                </div>
-                <div class="field">
-                    <label>Gap delta (s)</label>
-                    <input type="number" id="ovr-gap" min="0.1" step="0.1" value="1.5">
-                </div>
-                <div class="field">
-                    <label>End lap (blank = flag)</label>
-                    <input type="number" id="ovr-end" min="1" placeholder="flag">
-                </div>
-                <div class="field">
-                    <label>Max laps</label>
-                    <input type="number" id="ovr-maxlaps" min="1" max="120" value="80">
+            <!-- MODULE 02 · FULL-RACE REPLAY (advanced; folded by default) -->
+            <div class="ht-mod" id="ht-fullrace">
+                <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-fullrace',this)">
+                    <span class="ht-idx">02</span>
+                    <span class="ht-titles">
+                        <span class="ht-title">Full-Race Replay <span class="ht-adv">ADVANCED</span></span>
+                        <span class="ht-sub">Speed-trace replay to the flag · gap &amp; battery trade-off · lap data on
+                            demand</span>
+                    </span>
+                    <span class="ht-chev" aria-hidden="true">▾</span>
+                </button>
+                <div class="ht-body">
+                    <div class="two-col ht-cols">
+                        <div class="field">
+                            <label>Leader session ID</label>
+                            <input type="number" id="ovr-leader" min="1" placeholder="resolved from drivers above">
+                        </div>
+                        <div class="field">
+                            <label>Chaser session ID</label>
+                            <input type="number" id="ovr-chaser" min="1" placeholder="resolved from drivers above">
+                        </div>
+                        <div class="field">
+                            <label>Start lap</label>
+                            <input type="number" id="ovr-start" min="1" value="1">
+                        </div>
+                        <div class="field">
+                            <label>Gap delta (s)</label>
+                            <input type="number" id="ovr-gap" min="0.1" step="0.1" value="1.5">
+                        </div>
+                        <div class="field">
+                            <label>End lap (blank = flag)</label>
+                            <input type="number" id="ovr-end" min="1" placeholder="flag">
+                        </div>
+                        <div class="field">
+                            <label>Max laps</label>
+                            <input type="number" id="ovr-maxlaps" min="1" max="120" value="80">
+                        </div>
+                    </div>
+                    <div id="ovr-context" class="ht-resolved"></div>
+                    <details class="ht-hint">
+                        <summary>ⓘ How the replay works</summary>
+                        <p>Uses the leader / chaser / track / year picks in RACE CALL above — resolves the two drivers'
+                            real race sessions for that track &amp; season, then replays every shared lap to the flag.
+                            Tyre, fuel and ERS (race_state) features are read from the database, so energy_diff is real
+                            whenever the energy simulator has run for those sessions. Overtake % is split into S1/S2/S3
+                            by where the chaser is gaining and where the braking evidence sits. Runs again automatically
+                            when you re-run the energy simulator for one of these sessions.</p>
+                    </details>
+                    <details class="ht-hint">
+                        <summary>ENGINEERING DETAILS — ERS sweep &amp; duel settings</summary>
+                        <p style="margin-bottom:10px">Symmetric sweep re-scores each lap's energy_diff with that mode's
+                            projected trace on BOTH cars (only the ERS feature changes, so each row isolates that
+                            deployment choice). The asymmetric duel puts the leader on one ERS spec and the chaser on
+                            another (adds a <b style="color:#ff6b6b">LEADER &gt; CHASER</b> row/ring answering when the
+                            overtake happens when one attacks while the other defends).</p>
+                        <div style="margin-bottom:10px">
+                            <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox"
+                                    id="ovr-m-balanced" checked> Balanced</label>
+                            <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox"
+                                    id="ovr-m-push" checked> Push</label>
+                            <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox"
+                                    id="ovr-m-liftcoast"> Lift &amp; Coast</label>
+                        </div>
+                        <div style="margin-bottom:12px">
+                            <span style="font-size:0.72em;color:#eee;margin-right:10px">Leader <select id="ovr-lmode"
+                                    style="font-size:0.95em">
+                                    <option value="balanced">Balanced</option>
+                                    <option value="push">Push</option>
+                                    <option value="liftcoast">Lift &amp; Coast</option>
+                                    <option value="stored">As stored (real trace)</option>
+                                </select></span>
+                            <span style="font-size:0.72em;color:#eee">Chaser <select id="ovr-cmode"
+                                    style="font-size:0.95em">
+                                    <option value="balanced">Balanced</option>
+                                    <option value="push">Push</option>
+                                    <option value="liftcoast">Lift &amp; Coast</option>
+                                    <option value="stored">As stored (real trace)</option>
+                                </select></span>
+                        </div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap">
+                            <button class="action-btn" id="ovr-cal-scan"
+                                style="width:auto;margin:0;background:#1c1c24;color:#ccc"
+                                onclick="scanSeasonCalibration()">SCAN SEASON CALIBRATION</button>
+                            <button class="action-btn" id="ovr-rel-btn"
+                                style="width:auto;margin:0;background:#1c1c24;color:#ccc"
+                                onclick="loadReliabilityTable(true)">MODEL CALIBRATION &amp; RELIABILITY</button>
+                        </div>
+                    </details>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+                        <button class="action-btn" style="width:auto;margin:0" onclick="runFullRaceSim()">SIMULATE FULL
+                            RACE</button>
+                        <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc"
+                            onclick="resolveRaceSessions()">RESOLVE SESSIONS</button>
+                        <div class="export-menu">
+                            <button type="button" class="action-btn"
+                                style="width:auto;margin:0;background:#1c1c24;color:#ccc"
+                                onclick="htMenuToggle('ovr-export-list')">EXPORT ▾</button>
+                            <div class="export-menu-list" id="ovr-export-list" style="display:none">
+                                <button type="button" id="ovr-export-csv" onclick="exportRaceCsv()" disabled>EXPORT
+                                    CSV</button>
+                                <button type="button" id="ovr-export-json" onclick="exportRaceJson()" disabled>EXPORT
+                                    JSON</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="err-box" id="ovr-err"></div>
+                    <div id="ovr-cal-out"></div>
+                    <div id="ovr-reliability-out"></div>
+                    <div id="ovr-out"></div>
                 </div>
             </div>
-            <div id="ovr-context" class="ht-resolved"></div>
-            <details class="ht-hint">
-                <summary>ⓘ How the replay works</summary>
-                <p>Uses the leader / chaser / track / year picks in RACE CALL above — resolves the two drivers' real race sessions for that track &amp; season, then replays every shared lap to the flag. Tyre, fuel and ERS (race_state) features are read from the database, so energy_diff is real whenever the energy simulator has run for those sessions. Overtake % is split into S1/S2/S3 by where the chaser is gaining and where the braking evidence sits. Runs again automatically when you re-run the energy simulator for one of these sessions.</p>
-            </details>
-            <details class="ht-hint">
-                <summary>ENGINEERING DETAILS — ERS sweep &amp; duel settings</summary>
-                <p style="margin-bottom:10px">Symmetric sweep re-scores each lap's energy_diff with that mode's projected trace on BOTH cars (only the ERS feature changes, so each row isolates that deployment choice). The asymmetric duel puts the leader on one ERS spec and the chaser on another (adds a <b style="color:#ff6b6b">LEADER &gt; CHASER</b> row/ring answering when the overtake happens when one attacks while the other defends).</p>
-                <div style="margin-bottom:10px">
-                    <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-balanced" checked> Balanced</label>
-                    <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-push" checked> Push</label>
-                    <label style="margin-right:14px;font-size:0.72em;color:#ccc"><input type="checkbox" id="ovr-m-liftcoast"> Lift &amp; Coast</label>
+
+            <!-- MODULE 03 · PER-LAP & BATTLE TUNER (advanced; folded by default) -->
+            <div class="ht-mod" id="ht-tuner">
+                <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-tuner',this)">
+                    <span class="ht-idx">03</span>
+                    <span class="ht-titles">
+                        <span class="ht-title">Battle Tuner <span class="ht-adv">ADVANCED</span></span>
+                        <span class="ht-sub">Test the current battle under different tyre, fuel and energy
+                            conditions</span>
+                    </span>
+                    <span class="ht-chev" aria-hidden="true">▾</span>
+                </button>
+                <div class="ht-body">
+                    <div class="grp-label">INHERITED FROM RACE CALL</div>
+                    <div class="ht-inherit" id="bt-inherited">—</div>
+                    <div class="grp-label">CAR STATE — WHAT-IF DELTAS ON TOP</div>
+                    <div class="two-col ht-cols">
+                        <div class="field">
+                            <label>Fuel diff (kg) — chaser − leader fuel at lap start</label>
+                            <input type="number" id="ov-fueldiff" min="-20" max="20" step="0.5" value="-3.0">
+                        </div>
+                        <div class="field">
+                            <label>Energy diff (MJ) — chaser − leader battery entering lap</label>
+                            <input type="number" id="ov-energydiff" min="-2" max="2" step="0.1" value="0.0">
+                        </div>
+                        <div class="field">
+                            <label>Battle duration (laps)</label>
+                            <input type="number" id="ov-simlaps" min="1" max="60" value="12">
+                        </div>
+                    </div>
+                    <button class="action-btn" onclick="runOvertakeSim()">SIMULATE BATTLE</button>
+                    <details class="ht-hint">
+                        <summary>ⓘ What this tunes</summary>
+                        <p>One-lap overtake probability and a short battle roll-forward for the leader/chaser scenario
+                            set in RACE CALL above (drivers, track, tyre state, current lap and gap). Use these fields
+                            to probe what-if tyre / fuel / energy assumptions — the same P0 features drive the full-race
+                            replay, so this is the place to sanity-check the model, not the place to make the
+                            race-weekend call.</p>
+                    </details>
+                    <div class="err-box" id="bt-err"></div>
+                    <div id="ov-out"></div>
                 </div>
-                <div style="margin-bottom:12px">
-                    <span style="font-size:0.72em;color:#eee;margin-right:10px">Leader <select id="ovr-lmode" style="font-size:0.95em"><option value="balanced">Balanced</option><option value="push">Push</option><option value="liftcoast">Lift &amp; Coast</option><option value="stored">As stored (real trace)</option></select></span>
-                    <span style="font-size:0.72em;color:#eee">Chaser <select id="ovr-cmode" style="font-size:0.95em"><option value="balanced">Balanced</option><option value="push">Push</option><option value="liftcoast">Lift &amp; Coast</option><option value="stored">As stored (real trace)</option></select></span>
-                </div>
-                <div style="display:flex;gap:10px;flex-wrap:wrap">
-                    <button class="action-btn" id="ovr-cal-scan" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="scanSeasonCalibration()">SCAN SEASON CALIBRATION</button>
-                    <button class="action-btn" id="ovr-rel-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="loadReliabilityTable(true)">MODEL CALIBRATION &amp; RELIABILITY</button>
-                </div>
-            </details>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">
-                <button class="action-btn" style="width:auto;margin:0" onclick="runFullRaceSim()">SIMULATE FULL RACE</button>
-                <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="resolveRaceSessions()">RESOLVE SESSIONS</button>
-                <div class="export-menu">
-                    <button type="button" class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="htMenuToggle('ovr-export-list')">EXPORT ▾</button>
-                    <div class="export-menu-list" id="ovr-export-list" style="display:none">
-                        <button type="button" id="ovr-export-csv" onclick="exportRaceCsv()" disabled>EXPORT CSV</button>
-                        <button type="button" id="ovr-export-json" onclick="exportRaceJson()" disabled>EXPORT JSON</button>
+            </div>
+
+            <!-- MODULE 04 · ENERGY LAB (synthetic 2026 ERS; folded by default) -->
+            <div class="ht-mod" id="ht-energylab">
+                <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-energylab',this)">
+                    <span class="ht-idx">04</span>
+                    <span class="ht-titles">
+                        <span class="ht-title">Energy Lab <span class="ht-adv">SYNTHETIC ERS</span></span>
+                        <span class="ht-sub">Compare deployment modes, then fine-tune one lap sector by sector</span>
+                    </span>
+                    <span class="ht-chev" aria-hidden="true">▾</span>
+                </button>
+                <div class="ht-body">
+                    <div class="el-tabs">
+                        <button type="button" class="el-tab active" id="el-tab-compare" onclick="elShow('compare')">
+                            <span class="elt-t">COMPARE MODES</span><span class="elt-s">Which deployment strategy gives
+                                the best race outcome?</span>
+                        </button>
+                        <button type="button" class="el-tab" id="el-tab-sandbox" onclick="elShow('sandbox')">
+                            <span class="elt-t">SECTOR SANDBOX</span><span class="elt-s">Where should I deploy the
+                                energy?</span>
+                        </button>
+                    </div>
+                    <div class="el-pane" id="el-compare">
+                        <div class="ht-subcard">
+                            <div class="grp-label">COMPARE MODES — 3 DEPLOYMENT ENVELOPES OVER THE LAPS REMAINING</div>
+                            <div class="two-col" style="gap:10px;margin-bottom:0">
+                                <div class="field">
+                                    <label>Session ID</label>
+                                    <input type="number" id="e-session" min="1" value="78">
+                                </div>
+                                <div class="field">
+                                    <label>Current Lap</label>
+                                    <input type="number" id="e-lap" min="1" value="10">
+                                </div>
+                            </div>
+                            <div style="margin:6px 0 10px"><button type="button" class="ht-preset"
+                                    onclick="htInheritSession()"
+                                    title="Fill both Energy Lab session fields from the Race Call scenario">USE
+                                    RACE-CALL SESSION</button></div>
+                            <div class="field">
+                                <label>Battery Now (MJ) — blank = auto</label>
+                                <input type="number" id="e-batt" min="0" max="4" step="0.25"
+                                    placeholder="auto from trace (ES usable = 4 MJ)">
+                            </div>
+                            <details class="ht-hint" style="margin:2px 0 10px">
+                                <summary>ⓘ What it compares</summary>
+                                <p>Compares Push / Balanced / Lift&nbsp;&amp;&nbsp;Coast deployment over the laps
+                                    remaining in that session. Battery "now" defaults to the stored energy trace at the
+                                    chosen lap (full store if none).</p>
+                            </details>
+                            <button class="action-btn" onclick="runEnergyCompare()">ANALYZE ENERGY MODES</button>
+                            <div class="err-box" id="energy-err"></div>
+                            <div id="energy-whatif-out"></div>
+                        </div>
+                    </div>
+                    <div class="el-pane" id="el-sandbox" style="display:none">
+                        <div class="ht-subcard">
+                            <div class="grp-label">SECTOR SANDBOX — PER-SECTOR DEPLOY DELTAS WITHIN ONE LAP</div>
+                            <div class="two-col" style="gap:10px;margin-bottom:0">
+                                <div class="field">
+                                    <label>Session ID</label>
+                                    <input type="number" id="sb-session" min="1" value="78">
+                                </div>
+                                <div class="field">
+                                    <label>Lap</label>
+                                    <input type="number" id="sb-lap" min="1" value="10">
+                                </div>
+                            </div>
+                            <div style="margin:6px 0 10px"><button type="button" class="ht-preset"
+                                    onclick="htInheritSession()"
+                                    title="Fill both Energy Lab session fields from the Race Call scenario">USE
+                                    RACE-CALL SESSION</button></div>
+                            <div class="two-col" style="gap:10px;margin-bottom:0">
+                                <div class="field">
+                                    <label>Baseline Mode</label>
+                                    <select id="sb-mode">
+                                        <option value="balanced" selected>Balanced</option>
+                                        <option value="push">Push</option>
+                                        <option value="liftcoast">Lift &amp; Coast</option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label>Battery Now (MJ) — blank = auto</label>
+                                    <input type="number" id="sb-batt" min="0" max="4" step="0.25"
+                                        placeholder="auto from trace">
+                                </div>
+                            </div>
+                            <details class="ht-hint" style="margin:2px 0 10px">
+                                <summary>ⓘ What the sliders do</summary>
+                                <p>Per-sector deploy-delta sliders. The mode sets the lap's deploy envelope; deltas
+                                    <b>reallocate</b> it between S1/S2/S3 (zero-sum). The 2026 PU has <b>no fixed
+                                        per-lap deploy quota</b> — deployment is store-limited bursts (ceiling 8.5
+                                    MJ/lap). Watch for battery-floor and FIA-cap warnings.</p>
+                            </details>
+                            <div class="sb-sliders">
+                                <div class="sb-row"><label>S1</label><input type="range" id="sb-d1" min="-2" max="2"
+                                        step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val"
+                                        id="sb-v1">+0.00</span></div>
+                                <div class="sb-row"><label>S2</label><input type="range" id="sb-d2" min="-2" max="2"
+                                        step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val"
+                                        id="sb-v2">+0.00</span></div>
+                                <div class="sb-row"><label>S3</label><input type="range" id="sb-d3" min="-2" max="2"
+                                        step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val"
+                                        id="sb-v3">+0.00</span></div>
+                            </div>
+                            <div class="sb-sum" id="sb-sum">&Sigma; &Delta; = +0.00 MJ &middot; lap budget fixed &mdash;
+                                deltas reallocate within it (live recalc)</div>
+                            <button class="action-btn" onclick="runSandbox()">SIMULATE SECTOR SHIFT</button>
+                            <div class="err-box" id="sb-err"></div>
+                            <div id="sb-out"></div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="err-box" id="ovr-err"></div>
-            <div id="ovr-cal-out"></div>
-            <div id="ovr-reliability-out"></div>
-            <div id="ovr-out"></div>
-        </div>
-    </div>
 
-    <!-- MODULE 03 · PER-LAP & BATTLE TUNER (advanced; folded by default) -->
-    <div class="ht-mod" id="ht-tuner">
-        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-tuner',this)">
-            <span class="ht-idx">03</span>
-            <span class="ht-titles">
-                <span class="ht-title">Battle Tuner <span class="ht-adv">ADVANCED</span></span>
-                <span class="ht-sub">Test the current battle under different tyre, fuel and energy conditions</span>
-            </span>
-            <span class="ht-chev" aria-hidden="true">▾</span>
-        </button>
-        <div class="ht-body">
-            <div class="grp-label">INHERITED FROM RACE CALL</div>
-            <div class="ht-inherit" id="bt-inherited">—</div>
-            <div class="grp-label">CAR STATE — WHAT-IF DELTAS ON TOP</div>
-            <div class="two-col ht-cols">
-                <div class="field">
-                    <label>Fuel diff (kg) — chaser − leader fuel at lap start</label>
-                    <input type="number" id="ov-fueldiff" min="-20" max="20" step="0.5" value="-3.0">
-                </div>
-                <div class="field">
-                    <label>Energy diff (MJ) — chaser − leader battery entering lap</label>
-                    <input type="number" id="ov-energydiff" min="-2" max="2" step="0.1" value="0.0">
-                </div>
-                <div class="field">
-                    <label>Battle duration (laps)</label>
-                    <input type="number" id="ov-simlaps" min="1" max="60" value="12">
-                </div>
-            </div>
-            <button class="action-btn" onclick="runOvertakeSim()">SIMULATE BATTLE</button>
-            <details class="ht-hint">
-                <summary>ⓘ What this tunes</summary>
-                <p>One-lap overtake probability and a short battle roll-forward for the leader/chaser scenario set in RACE CALL above (drivers, track, tyre state, current lap and gap). Use these fields to probe what-if tyre / fuel / energy assumptions — the same P0 features drive the full-race replay, so this is the place to sanity-check the model, not the place to make the race-weekend call.</p>
-            </details>
-            <div class="err-box" id="bt-err"></div>
-            <div id="ov-out"></div>
-        </div>
-    </div>
-
-    <!-- MODULE 04 · ENERGY LAB (synthetic 2026 ERS; folded by default) -->
-    <div class="ht-mod" id="ht-energylab">
-        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-energylab',this)">
-            <span class="ht-idx">04</span>
-            <span class="ht-titles">
-                <span class="ht-title">Energy Lab <span class="ht-adv">SYNTHETIC ERS</span></span>
-                <span class="ht-sub">Compare deployment modes, then fine-tune one lap sector by sector</span>
-            </span>
-            <span class="ht-chev" aria-hidden="true">▾</span>
-        </button>
-        <div class="ht-body">
-            <div class="el-tabs">
-                <button type="button" class="el-tab active" id="el-tab-compare" onclick="elShow('compare')">
-                    <span class="elt-t">COMPARE MODES</span><span class="elt-s">Which deployment strategy gives the best race outcome?</span>
+            <!-- MODULE 05 · VALIDATION — energy benchmark, any stored race (folded by default) -->
+            <div class="ht-mod" id="ht-validation">
+                <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-validation',this)">
+                    <span class="ht-idx">05</span>
+                    <span class="ht-titles">
+                        <span class="ht-title">Validation <span class="ht-adv">ENERGY BENCHMARK</span></span>
+                        <span class="ht-sub">AI strategy vs 'Flat-Out' on any stored race · fleet summary · the deck's
+                            Monaco −1.8s claim, re-runnable</span>
+                    </span>
+                    <span class="ht-chev" aria-hidden="true">▾</span>
                 </button>
-                <button type="button" class="el-tab" id="el-tab-sandbox" onclick="elShow('sandbox')">
-                    <span class="elt-t">SECTOR SANDBOX</span><span class="elt-s">Where should I deploy the energy?</span>
-                </button>
-            </div>
-            <div class="el-pane" id="el-compare">
-            <div class="ht-subcard">
-                    <div class="grp-label">COMPARE MODES — 3 DEPLOYMENT ENVELOPES OVER THE LAPS REMAINING</div>
-                    <div class="two-col" style="gap:10px;margin-bottom:0">
-                        <div class="field">
-                            <label>Session ID</label>
-                            <input type="number" id="e-session" min="1" value="78">
+                <div class="ht-body">
+                    <div class="ht-subcard">
+                        <div class="grp-label">RACE — WHICH BENCHMARK</div>
+                        <div class="two-col ht-cols" style="gap:12px">
+                            <div class="field" style="margin:0">
+                                <label>Track</label>
+                                <select id="bm-track" onchange="bmYearOptions()">
+                                    <option value="">Loading tracks…</option>
+                                </select>
+                            </div>
+                            <div class="field" style="margin:0">
+                                <label>Season</label>
+                                <select id="bm-year" onchange="bmSelectRace()">
+                                    <option value="">—</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="field">
-                            <label>Current Lap</label>
-                            <input type="number" id="e-lap" min="1" value="10">
+                        <div class="chart-note" style="margin:8px 0 10px">Every stored race with ≥25 timed laps is
+                            benchmarked by the fleet sweep (<b>scripts/benchmark_energy_fleet.py</b>,
+                            <code>backtests/energy_fleet_summary.json</code>). Monaco 2023 is the deck anchor and
+                            carries the reproduction badge.</div>
+
+                        <div class="grp-label">HEADLINE — <span id="bm-race-label">…</span></div>
+                        <div id="bm-energy-out">
+                            <div class="chart-note">Loading benchmark…</div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px">
+                            <button class="action-btn" style="width:auto;margin:0"
+                                onclick="rerunEnergyBenchmark(this)">⟳ RE-RUN BENCHMARK</button>
+                            <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc"
+                                onclick="bmReload()">RELOAD</button>
+                            <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc"
+                                id="bm-fleet-btn" onclick="rebuildFleetSummary(this)">⟳ REBUILD FLEET SUMMARY</button>
+                            <span style="font-size:0.64em;color:#667" id="bm-energy-meta"></span>
+                        </div>
+                        <div class="err-box" id="bm-energy-err" style="display:none"></div>
+                        <div class="chart-card" style="height:300px;margin-top:14px;display:none"
+                            id="bm-energy-chart-card">
+                            <canvas id="bmEnergyChart"></canvas>
+                        </div>
+                        <details class="ht-hint" style="margin-top:12px">
+                            <summary>ⓘ What this validates</summary>
+                            <p>Reproduces the Trackshift deck's page-8 headline — "<b>1.8s race time improvement</b>" of
+                                the AI strategy vs a 'Flat-Out' baseline, 2023 Monaco GP — and extends the same
+                                projection to <b>every stored race</b>. Flat-Out = the <i>push</i> mode (full deploy
+                                ceiling, battery to the floor, then energy-limited); AI strategy = the fastest mode that
+                                finishes above the battery reserve (mode differs per track — <i>balanced</i> on Monaco,
+                                <i>liftcoast</i> on high-regen tracks). Closing phase = the final 15 laps; on Monaco
+                                2023 that mean lands at −1.88s (reproduced ✓ vs the deck's −1.8s), while the honest
+                                full-race projection is ≈ −9.4s — the deck number is conservative and this panel shows
+                                exactly which window produces it. Pace credit = the track's <b>measured</b> s/MJ ×
+                                deployed MJ (name-alias/case aware, so no track silently falls back to the flat
+                                constant); the shared baseline lap time cancels out of every delta. <b>RE-RUN
+                                    BENCHMARK</b> regenerates the selected race (~seconds, deterministic — same DB
+                                yields the same numbers) and <b>REBUILD FLEET SUMMARY</b> re-sweeps all stored races, so
+                                the figures can never go stale.</p>
+                        </details>
+                    </div>
+
+                    <div class="ht-subcard" style="margin-top:14px">
+                        <div class="grp-label">FLEET SUMMARY — WHERE THE STRATEGY GAINS ARE LARGEST <span
+                                style="color:#667;font-weight:400">(all stored races, biggest gain first)</span></div>
+                        <div id="bm-fleet-out">
+                            <div class="chart-note">Loading fleet summary…</div>
                         </div>
                     </div>
-                    <div style="margin:6px 0 10px"><button type="button" class="ht-preset" onclick="htInheritSession()" title="Fill both Energy Lab session fields from the Race Call scenario">USE RACE-CALL SESSION</button></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB: DRIVER COMPARISON -->
+        <div id="tab-drivers" class="tab-panel">
+            <div class="two-col">
+                <div class="panel red">
+                    <div class="panel-title">1 - Compare on a Track</div>
                     <div class="field">
-                        <label>Battery Now (MJ) — blank = auto</label>
-                        <input type="number" id="e-batt" min="0" max="4" step="0.25" placeholder="auto from trace (ES usable = 4 MJ)">
-                    </div>
-                    <details class="ht-hint" style="margin:2px 0 10px">
-                        <summary>ⓘ What it compares</summary>
-                        <p>Compares Push / Balanced / Lift&nbsp;&amp;&nbsp;Coast deployment over the laps remaining in that session. Battery "now" defaults to the stored energy trace at the chosen lap (full store if none).</p>
-                    </details>
-                    <button class="action-btn" onclick="runEnergyCompare()">ANALYZE ENERGY MODES</button>
-                    <div class="err-box" id="energy-err"></div>
-                    <div id="energy-whatif-out"></div>
-            </div>
-            </div>
-            <div class="el-pane" id="el-sandbox" style="display:none">
-            <div class="ht-subcard">
-                    <div class="grp-label">SECTOR SANDBOX — PER-SECTOR DEPLOY DELTAS WITHIN ONE LAP</div>
-                    <div class="two-col" style="gap:10px;margin-bottom:0">
-                        <div class="field">
-                            <label>Session ID</label>
-                            <input type="number" id="sb-session" min="1" value="78">
-                        </div>
-                        <div class="field">
-                            <label>Lap</label>
-                            <input type="number" id="sb-lap" min="1" value="10">
-                        </div>
-                    </div>
-                    <div style="margin:6px 0 10px"><button type="button" class="ht-preset" onclick="htInheritSession()" title="Fill both Energy Lab session fields from the Race Call scenario">USE RACE-CALL SESSION</button></div>
-                    <div class="two-col" style="gap:10px;margin-bottom:0">
-                        <div class="field">
-                            <label>Baseline Mode</label>
-                            <select id="sb-mode">
-                                <option value="balanced" selected>Balanced</option>
-                                <option value="push">Push</option>
-                                <option value="liftcoast">Lift &amp; Coast</option>
-                            </select>
-                        </div>
-                        <div class="field">
-                            <label>Battery Now (MJ) — blank = auto</label>
-                            <input type="number" id="sb-batt" min="0" max="4" step="0.25" placeholder="auto from trace">
-                        </div>
-                    </div>
-                    <details class="ht-hint" style="margin:2px 0 10px">
-                        <summary>ⓘ What the sliders do</summary>
-                        <p>Per-sector deploy-delta sliders. The mode sets the lap's deploy envelope; deltas <b>reallocate</b> it between S1/S2/S3 (zero-sum). The 2026 PU has <b>no fixed per-lap deploy quota</b> — deployment is store-limited bursts (ceiling 8.5 MJ/lap). Watch for battery-floor and FIA-cap warnings.</p>
-                    </details>
-                    <div class="sb-sliders">
-                        <div class="sb-row"><label>S1</label><input type="range" id="sb-d1" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v1">+0.00</span></div>
-                        <div class="sb-row"><label>S2</label><input type="range" id="sb-d2" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v2">+0.00</span></div>
-                        <div class="sb-row"><label>S3</label><input type="range" id="sb-d3" min="-2" max="2" step="0.05" value="0" oninput="sbSliderInput()"><span class="sb-val" id="sb-v3">+0.00</span></div>
-                    </div>
-                    <div class="sb-sum" id="sb-sum">&Sigma; &Delta; = +0.00 MJ &middot; lap budget fixed &mdash; deltas reallocate within it (live recalc)</div>
-                    <button class="action-btn" onclick="runSandbox()">SIMULATE SECTOR SHIFT</button>
-                    <div class="err-box" id="sb-err"></div>
-                    <div id="sb-out"></div>
-            </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODULE 05 · VALIDATION — energy benchmark, any stored race (folded by default) -->
-    <div class="ht-mod" id="ht-validation">
-        <button type="button" class="ht-head" aria-expanded="false" onclick="htToggle('ht-validation',this)">
-            <span class="ht-idx">05</span>
-            <span class="ht-titles">
-                <span class="ht-title">Validation <span class="ht-adv">ENERGY BENCHMARK</span></span>
-                <span class="ht-sub">AI strategy vs 'Flat-Out' on any stored race · fleet summary · the deck's Monaco −1.8s claim, re-runnable</span>
-            </span>
-            <span class="ht-chev" aria-hidden="true">▾</span>
-        </button>
-        <div class="ht-body">
-            <div class="ht-subcard">
-                <div class="grp-label">RACE — WHICH BENCHMARK</div>
-                <div class="two-col ht-cols" style="gap:12px">
-                    <div class="field" style="margin:0">
-                        <label>Track</label>
-                        <select id="bm-track" onchange="bmYearOptions()"><option value="">Loading tracks…</option></select>
-                    </div>
-                    <div class="field" style="margin:0">
                         <label>Season</label>
-                        <select id="bm-year" onchange="bmSelectRace()"><option value="">—</option></select>
+                        <select id="rc-year" onchange="loadComparisonTracks()">
+                            <option value="">Loading seasons...</option>
+                        </select>
                     </div>
-                </div>
-                <div class="chart-note" style="margin:8px 0 10px">Every stored race with ≥25 timed laps is benchmarked by the fleet sweep (<b>scripts/benchmark_energy_fleet.py</b>, <code>backtests/energy_fleet_summary.json</code>). Monaco 2023 is the deck anchor and carries the reproduction badge.</div>
+                    <div class="field">
+                        <label>Track</label>
+                        <select id="rc-track" onchange="loadComparisonDrivers()">
+                            <option value="">Pick a season first</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Drivers (pick 2 or more)</label>
+                        <div class="rc-drivers" id="rc-drivers">
+                            <div style="color:var(--muted);font-size:0.72em;padding:8px">Pick a track to load drivers...
+                            </div>
+                        </div>
+                    </div>
+                    <button class="action-btn" onclick="runRaceCompare()">COMPARE RACE LAPS</button>
+                    <div class="err-box" id="rc-err"></div>
 
-                <div class="grp-label">HEADLINE — <span id="bm-race-label">…</span></div>
-                <div id="bm-energy-out">
-                    <div class="chart-note">Loading benchmark…</div>
+                    <div class="dc-divider"></div>
+                    <div class="panel-title">2 - Model Pace Gap (optional)</div>
+                    <div class="field">
+                        <label>Driver A</label>
+                        <select id="dc-driver-a" onchange="updateDcYearOptions()">
+                            <option value="">Loading drivers...</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Driver B</label>
+                        <select id="dc-driver-b" onchange="updateDcYearOptions()">
+                            <option value="">Loading drivers...</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Season (same-year models)</label>
+                        <select id="dc-year">
+                            <option value="">All seasons (aggregate)</option>
+                        </select>
+                    </div>
+                    <button class="action-btn" onclick="runDriverCompare()">COMPARE MODELS</button>
+                    <div class="err-box" id="dc-err"></div>
+                    <div class="chart-note" style="margin-top:10px">Each driver has a model trained on their own race
+                        laps. On a shared track &amp; tyre, the predicted-time gap is the pace gap. Pick a season to use
+                        each driver's same-year model (apples-to-apples); drivers without that season's model fall back
+                        to their aggregate.</div>
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px">
-                    <button class="action-btn" style="width:auto;margin:0" onclick="rerunEnergyBenchmark(this)">⟳ RE-RUN BENCHMARK</button>
-                    <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" onclick="bmReload()">RELOAD</button>
-                    <button class="action-btn" style="width:auto;margin:0;background:#1c1c24;color:#ccc" id="bm-fleet-btn" onclick="rebuildFleetSummary(this)">⟳ REBUILD FLEET SUMMARY</button>
-                    <span style="font-size:0.64em;color:#667" id="bm-energy-meta"></span>
-                </div>
-                <div class="err-box" id="bm-energy-err" style="display:none"></div>
-                <div class="chart-card" style="height:300px;margin-top:14px;display:none" id="bm-energy-chart-card">
-                    <canvas id="bmEnergyChart"></canvas>
-                </div>
-                <details class="ht-hint" style="margin-top:12px">
-                    <summary>ⓘ What this validates</summary>
-                    <p>Reproduces the Trackshift deck's page-8 headline — "<b>1.8s race time improvement</b>" of the AI strategy vs a 'Flat-Out' baseline, 2023 Monaco GP — and extends the same projection to <b>every stored race</b>. Flat-Out = the <i>push</i> mode (full deploy ceiling, battery to the floor, then energy-limited); AI strategy = the fastest mode that finishes above the battery reserve (mode differs per track — <i>balanced</i> on Monaco, <i>liftcoast</i> on high-regen tracks). Closing phase = the final 15 laps; on Monaco 2023 that mean lands at −1.88s (reproduced ✓ vs the deck's −1.8s), while the honest full-race projection is ≈ −9.4s — the deck number is conservative and this panel shows exactly which window produces it. Pace credit = the track's <b>measured</b> s/MJ × deployed MJ (name-alias/case aware, so no track silently falls back to the flat constant); the shared baseline lap time cancels out of every delta. <b>RE-RUN BENCHMARK</b> regenerates the selected race (~seconds, deterministic — same DB yields the same numbers) and <b>REBUILD FLEET SUMMARY</b> re-sweeps all stored races, so the figures can never go stale.</p>
-                </details>
-            </div>
+                <div class="panel teal">
+                    <div class="panel-title">Race Lap Comparison</div>
+                    <div class="dc-summary" id="rc-summary"></div>
+                    <div class="rc-legend" id="rc-legend"></div>
+                    <div class="chart-card" style="height:380px;margin-top:12px">
+                        <canvas id="rcChart"></canvas>
+                    </div>
+                    <div class="chart-note" id="rc-note">triangle = pit in/out lap</div>
+                    <table class="dc-table" id="rc-table" style="display:none">
+                        <thead>
+                            <tr>
+                                <th>Driver</th>
+                                <th>Laps</th>
+                                <th>Fastest</th>
+                                <th>Avg (valid)</th>
+                                <th>Tyres used</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
 
-            <div class="ht-subcard" style="margin-top:14px">
-                <div class="grp-label">FLEET SUMMARY — WHERE THE STRATEGY GAINS ARE LARGEST <span style="color:#667;font-weight:400">(all stored races, biggest gain first)</span></div>
-                <div id="bm-fleet-out">
-                    <div class="chart-note">Loading fleet summary…</div>
+                    <div class="dc-divider"></div>
+                    <div class="panel-title">Model Pace Gap</div>
+                    <div class="dc-summary" id="dc-summary"></div>
+                    <div class="chart-card" style="height:320px;margin-top:12px">
+                        <canvas id="dcChart"></canvas>
+                    </div>
+                    <div class="chart-note" id="dc-note"></div>
+                    <table class="dc-table" id="dc-table" style="display:none">
+                        <thead>
+                            <tr>
+                                <th>Track</th>
+                                <th>Avg D (s)</th>
+                                <th>Faster</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
             </div>
         </div>
+
     </div>
-</div>
 
-<!-- TAB: DRIVER COMPARISON -->
-<div id="tab-drivers" class="tab-panel">
-    <div class="two-col">
-        <div class="panel red">
-            <div class="panel-title">1 - Compare on a Track</div>
-            <div class="field">
-                <label>Season</label>
-                <select id="rc-year" onchange="loadComparisonTracks()">
-                    <option value="">Loading seasons...</option>
-                </select>
-            </div>
-            <div class="field">
-                <label>Track</label>
-                <select id="rc-track" onchange="loadComparisonDrivers()">
-                    <option value="">Pick a season first</option>
-                </select>
-            </div>
-            <div class="field">
-                <label>Drivers (pick 2 or more)</label>
-                <div class="rc-drivers" id="rc-drivers">
-                    <div style="color:var(--muted);font-size:0.72em;padding:8px">Pick a track to load drivers...</div>
-                </div>
-            </div>
-            <button class="action-btn" onclick="runRaceCompare()">COMPARE RACE LAPS</button>
-            <div class="err-box" id="rc-err"></div>
-
-            <div class="dc-divider"></div>
-            <div class="panel-title">2 - Model Pace Gap (optional)</div>
-            <div class="field">
-                <label>Driver A</label>
-                <select id="dc-driver-a" onchange="updateDcYearOptions()">
-                    <option value="">Loading drivers...</option>
-                </select>
-            </div>
-            <div class="field">
-                <label>Driver B</label>
-                <select id="dc-driver-b" onchange="updateDcYearOptions()">
-                    <option value="">Loading drivers...</option>
-                </select>
-            </div>
-            <div class="field">
-                <label>Season (same-year models)</label>
-                <select id="dc-year">
-                    <option value="">All seasons (aggregate)</option>
-                </select>
-            </div>
-            <button class="action-btn" onclick="runDriverCompare()">COMPARE MODELS</button>
-            <div class="err-box" id="dc-err"></div>
-            <div class="chart-note" style="margin-top:10px">Each driver has a model trained on their own race laps. On a shared track &amp; tyre, the predicted-time gap is the pace gap. Pick a season to use each driver's same-year model (apples-to-apples); drivers without that season's model fall back to their aggregate.</div>
-        </div>
-        <div class="panel teal">
-            <div class="panel-title">Race Lap Comparison</div>
-            <div class="dc-summary" id="rc-summary"></div>
-            <div class="rc-legend" id="rc-legend"></div>
-            <div class="chart-card" style="height:380px;margin-top:12px">
-                <canvas id="rcChart"></canvas>
-            </div>
-            <div class="chart-note" id="rc-note">triangle = pit in/out lap</div>
-            <table class="dc-table" id="rc-table" style="display:none">
-                <thead>
-                    <tr><th>Driver</th><th>Laps</th><th>Fastest</th><th>Avg (valid)</th><th>Tyres used</th></tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-
-            <div class="dc-divider"></div>
-            <div class="panel-title">Model Pace Gap</div>
-            <div class="dc-summary" id="dc-summary"></div>
-            <div class="chart-card" style="height:320px;margin-top:12px">
-                <canvas id="dcChart"></canvas>
-            </div>
-            <div class="chart-note" id="dc-note"></div>
-            <table class="dc-table" id="dc-table" style="display:none">
-                <thead>
-                    <tr><th>Track</th><th>Avg D (s)</th><th>Faster</th></tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="/static/js/core.js"></script>
-<script src="/static/js/dashboard.js"></script>
-<script src="/static/js/drivers.js"></script>
-<script src="/static/js/whatif.js"></script>
-<script src="/static/js/policies.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="/static/js/core.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/drivers.js"></script>
+    <script src="/static/js/whatif.js"></script>
+    <script src="/static/js/policies.js"></script>
 </body>
+
 </html>

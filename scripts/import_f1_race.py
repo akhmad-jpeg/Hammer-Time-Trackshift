@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # modules (e.g. capture_telemetry) that import helpers from this file, so it
 # is imported lazily and guarded.
 try:
+    # pyrefly: ignore [missing-import]
     import fastf1
 except ImportError:
     fastf1 = None

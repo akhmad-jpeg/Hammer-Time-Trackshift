@@ -1,6 +1,7 @@
 from flask import Flask, render_template, jsonify, request
 import os
 import sys
+# pyrefly: ignore [missing-import]
 import joblib
 import json
 import traceback
@@ -201,6 +202,78 @@ MEASURED_SLOPE_CAP = 0.25       # s/lap — anything above is an artefact
 @app.route('/')
 def index():
     return render_template('dashboard.html')
+
+
+@app.route('/api/overtake_analysis')
+def overtake_analysis_api():
+    """Overtake analysis with enriched tyre state + race length from the DB."""
+    json_path = PROJECT_ROOT / 'outputs' / 'australian_gp_2026_lec_rus_result.json'
+    if not json_path.exists():
+        return jsonify({'status': 'not_found', 'message': 'Overtake analysis result not generated yet.'}), 404
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    # Enrich with tyre state and race length from the database so the
+    # auto-fill can populate the Hammer Time scenario completely.
+    attacker = data.get('attacker', '')
+    defender = data.get('defender', '')
+    lap = data.get('lap', 0)
+    year = 2026  # Australian GP 2026
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("""
+            SELECT s.session_id, s.track_name, s.date, d.driver_code,
+                   l.lap_number, l.tyre_compound, l.tyre_age, l.lap_time_ms
+            FROM sessions s
+            JOIN drivers d ON s.driver_id = d.driver_id
+            JOIN laps l ON l.session_id = s.session_id
+            WHERE d.driver_code IN (%s, %s)
+              AND YEAR(s.date) = %s
+              AND s.session_type = 'Race'
+              AND l.lap_number = %s
+        """, (attacker, defender, year, lap))
+        tyre_map = {}
+        max_lap = 0
+        for row in cur.fetchall():
+            code = row['driver_code']
+            tyre_map[code] = {
+                'tyre_compound': row['tyre_compound'],
+                'tyre_age': row['tyre_age'],
+                'session_id': row['session_id'],
+                'track_name': row['track_name'],
+                'date': str(row['date']) if row.get('date') else None,
+            }
+        # Get total race laps for the race length
+        if attacker in tyre_map:
+            sid = tyre_map[attacker]['session_id']
+            cur.execute("""
+                SELECT MAX(lap_number) AS total_laps
+                FROM laps WHERE session_id = %s AND lap_time_ms > 0
+            """, (sid,))
+            r = cur.fetchone()
+            if r and r['total_laps']:
+                max_lap = int(r['total_laps'])
+        # Calculate realistic battle gap from the telemetry closing phase
+        gap_before_s = 0.8
+        ca = data.get('closest_approach', {})
+        if 'driver_a_time_s' in ca and 'driver_b_time_s' in ca:
+            dt = abs(float(ca['driver_a_time_s']) - float(ca['driver_b_time_s']))
+            if 0.1 <= dt <= 2.5:
+                gap_before_s = round(dt, 2)
+        cur.close()
+        conn.close()
+        data['_enriched'] = True
+        data['_tyres'] = tyre_map
+        data['_race_laps'] = max_lap
+        data['_gap_before_s'] = gap_before_s
+    except Exception:
+        # Graceful fallback — still return the base data
+        pass
+    return jsonify({'status': 'success', 'data': data})
+
 
 
 # SESSION / TELEMETRY API
@@ -2742,12 +2815,65 @@ def overtake_options():
     """Drivers with pace models + tracks/tyres the overtake model covers."""
     _models, info, err = _load_overtake()
     drivers = []
+    seen_codes = set()
     for d in driver_comparison.list_driver_models():
+        code = d["code"]
+        seen_codes.add(code)
         drivers.append({
-            "code": d["code"], "name": d["name"],
+            "code": code, "name": d["name"],
             "years": d.get("years", []), "tracks": d.get("tracks", []),
             "mae": d.get("mae"),
         })
+
+    # Include full grid / DB drivers so dropdown lists all drivers
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT driver_code, driver_name FROM drivers ORDER BY driver_name")
+        for r in cursor.fetchall():
+            c = (r.get('driver_code') or '').strip().upper()
+            if c and c not in seen_codes:
+                seen_codes.add(c)
+                drivers.append({
+                    "code": c,
+                    "name": r.get('driver_name') or c,
+                    "years": [],
+                    "tracks": [],
+                    "mae": None
+                })
+    except Exception:
+        pass
+    finally:
+        if conn:
+            try: conn.close()
+            except: pass
+
+    DEFAULT_GRID = [
+        ("LEC", "Charles Leclerc"),
+        ("RUS", "George Russell"),
+        ("HAM", "Lewis Hamilton"),
+        ("VER", "Max Verstappen"),
+        ("NOR", "Lando Norris"),
+        ("PIA", "Oscar Piastri"),
+        ("SAI", "Carlos Sainz"),
+        ("ALO", "Fernando Alonso"),
+        ("PER", "Sergio Perez"),
+        ("STR", "Lance Stroll"),
+        ("TSU", "Yuki Tsunoda"),
+        ("GAS", "Pierre Gasly"),
+        ("OCO", "Esteban Ocon"),
+        ("ALB", "Alexander Albon"),
+        ("BOT", "Valtteri Bottas"),
+        ("HUL", "Nico Hulkenberg"),
+    ]
+    for c, n in DEFAULT_GRID:
+        if c not in seen_codes:
+            seen_codes.add(c)
+            drivers.append({"code": c, "name": n, "years": [], "tracks": [], "mae": None})
+
+    drivers.sort(key=lambda x: x["name"])
+
     tracks = (overtake_inference.covered_tracks(_models[2])
               if _models else [])
     payload = {

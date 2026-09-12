@@ -41,6 +41,7 @@ import json
 from bisect import bisect_right
 from pathlib import Path
 
+# pyrefly: ignore [missing-import]
 import joblib
 import pandas as pd
 
@@ -85,9 +86,10 @@ def tyre_advantage(chaser_compound, leader_compound):
     return l - c
 
 
-def _normalise_track_name(track_name):
-    """Same strip + title-case normalisation the lap pipeline uses."""
-    return str(track_name).strip().title()
+def _normalise_track_name(track_name, feature_names=None):
+    """Normalise track name and resolve aliases against feature_names."""
+    from feature_pipeline import _normalise_track_name as _fp_normalise
+    return _fp_normalise(track_name, feature_names)
 
 
 # The importer stored some circuits under names that differ from the ones
@@ -106,6 +108,10 @@ def _normalise_track_name(track_name):
 TRACK_ALIASES = {
     "Monaco": "Circuit De Monaco",
     "Miami International Autodrome": "Miami Gardens",
+    "Albert Park Grand Prix Circuit": "Albert Park Circuit",
+    "Albert Park": "Albert Park Circuit",
+    "Australia": "Albert Park Circuit",
+    "Melbourne": "Albert Park Circuit",
 }
 
 
@@ -115,7 +121,10 @@ def _canonical_track_name(track_name):
     for the overtake feature row / coverage flag — the per-driver lap models
     legitimately cover both spellings, so their pace path is left untouched."""
     name = _normalise_track_name(track_name)
-    return TRACK_ALIASES.get(name, name)
+    for k, v in TRACK_ALIASES.items():
+        if k.lower() == name.lower() or k.lower() == str(track_name).strip().lower():
+            return v
+    return name
 
 
 def covered_tracks(feature_names):
@@ -2107,7 +2116,7 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     if leader_posture not in LIVE_LEADER_DEFENSE_POSTURES:
         raise ValueError("leader_posture must be one of "
                          f"{LIVE_LEADER_DEFENSE_POSTURES}")
-    track_name = str(track_name).strip()
+    track_name = _normalise_track_name(track_name)
     start_lap = int(start_lap)
     race_length = int(race_length)
     if start_lap < 1:
@@ -2265,7 +2274,7 @@ def simulate_live_call(leader_code, chaser_code, track_name,
             model, fnames, info, _used_year = _load_driver_model_cached(code)
         except FileNotFoundError as exc:
             raise ValueError(f"{code}: {exc}")
-        if _normalise_track_name(track_name) not in lap_covered_tracks(fnames):
+        if _normalise_track_name(track_name, fnames) not in lap_covered_tracks(fnames):
             raise ValueError(
                 f"{code}: aggregate career model has no data for "
                 f"'{track_name}' — cannot call this circuit live.")

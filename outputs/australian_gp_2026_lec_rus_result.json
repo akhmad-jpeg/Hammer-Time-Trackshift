@@ -1,0 +1,30 @@
+{
+  "race": "2026 Australian Grand Prix",
+  "session": "Race",
+  "lap": 3,
+  "attacker": "LEC",
+  "defender": "RUS",
+  "overtake_completed": true,
+  "overtake_distance_m": 469.1518251938427,
+  "closest_approach": {
+    "distance_m": 1655.1518251938426,
+    "spatial_separation_m": 0.040186436466836964,
+    "x": -4108.0373070704545,
+    "y": 11013.115179830982,
+    "driver_a_speed_kmh": 248.37529535743903,
+    "driver_b_speed_kmh": 263.939971189057,
+    "driver_a_time_s": 29.019148708723026,
+    "driver_b_time_s": 28.744197699116082
+  },
+  "closing_phase": {
+    "start_distance_m": 1624.1518251938426,
+    "end_distance_m": 1655.1518251938426
+  },
+  "overtake_x": -3565.1648038944154,
+  "overtake_y": 2184.305444391224,
+  "overtake_spatial_separation_m": 90.43279874661965,
+  "attacker_speed_kmh": 195.23994151361217,
+  "defender_speed_kmh": 202.1883012695455,
+  "attacker_time_s": 7.4132893289213735,
+  "defender_time_s": 7.413557205276257
+}

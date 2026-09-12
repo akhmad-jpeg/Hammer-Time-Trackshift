@@ -5,6 +5,7 @@ cd /d "%~dp0.."
 
 set "PYTHON=python"
 if exist ".venv\Scripts\python.exe" set "PYTHON=.venv\Scripts\python.exe"
+if exist "myvenv\Scripts\python.exe" set "PYTHON=myvenv\Scripts\python.exe"
 
 cls
 echo ============================================================

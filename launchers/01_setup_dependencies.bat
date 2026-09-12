@@ -9,7 +9,7 @@ echo  F1 STRATEGY PLATFORM - SETUP DEPENDENCIES
 echo ============================================================
 echo.
 
-if not exist ".venv\Scripts\python.exe" (
+if not exist ".venv\Scripts\python.exe" if not exist "myvenv\Scripts\python.exe" (
     echo  [SETUP] No virtual environment found - creating .venv ...
     python -m venv .venv
     if errorlevel 1 (

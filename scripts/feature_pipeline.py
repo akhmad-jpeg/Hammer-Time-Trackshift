@@ -187,15 +187,57 @@ def covered_tyres(feature_names: list) -> list:
                   and ':' not in f)
 
 
-def _normalise_track_name(track_name: str) -> str:
-    """Apply the same normalisation used during training (strip + title-case).
+TRACK_ALIASES = {
+    'albert park grand prix circuit': 'Albert Park Circuit',
+    'albert park': 'Albert Park Circuit',
+    'australia': 'Albert Park Circuit',
+    'melbourne': 'Albert Park Circuit',
+    'bahrain': 'Bahrain International Circuit',
+    'sakhir': 'Bahrain International Circuit',
+    'jeddah': 'Jeddah Corniche Circuit',
+    'monaco': 'Circuit De Monaco',
+    'barcelona': 'Circuit De Barcelona-Catalunya',
+    'catalunya': 'Circuit De Barcelona-Catalunya',
+    'silverstone': 'Silverstone Circuit',
+    'monza': 'Autodromo Nazionale Di Monza',
+    'imola': 'Autodromo Internazionale Enzo E Dino Ferrari',
+    'spa': 'Spa-Francorchamps',
+    'zandvoort': 'Circuit Zandvoort',
+    'austin': 'Austin',
+    'cota': 'Austin',
+    'interlagos': 'São Paulo',
+    'sao paulo': 'São Paulo',
+    'suzuka': 'Suzuka International Racing Course',
+}
 
-    Track names from the sessions API keep the raw FastF1 casing (e.g.
-    "Circuit de Barcelona-Catalunya") while the model features are trained
-    on the title-cased form ("Circuit De Barcelona-Catalunya") — both must
-    resolve to the same feature.
+
+def _normalise_track_name(track_name: str, feature_names: list = None) -> str:
+    """Apply normalisation (strip + title-case) and resolve track aliases.
+
+    Track names from the sessions API or UI can be aliases (e.g.
+    "Albert Park Grand Prix Circuit" or "Australia") while model features
+    are trained on canonical title-cased names ("Albert Park Circuit").
     """
-    return str(track_name).strip().title()
+    raw = str(track_name or '').strip()
+    raw_lower = raw.lower()
+    if raw_lower in TRACK_ALIASES:
+        target = TRACK_ALIASES[raw_lower]
+        if feature_names is None or f'track_{target}' in feature_names:
+            return target
+
+    norm = raw.title()
+    if feature_names is not None:
+        if f'track_{norm}' in feature_names:
+            return norm
+        cov = covered_tracks(feature_names)
+        for c in cov:
+            c_low = c.lower()
+            if raw_lower in c_low or c_low in raw_lower:
+                return c
+            words = [w for w in raw_lower.split() if len(w) > 3 and w not in ('circuit', 'grand', 'prix', 'autodrome', 'international')]
+            if words and any(w in c_low for w in words):
+                return c
+    return norm
 
 
 def validate_model_inputs(tyre_compound: str, track_name: str, feature_names: list) -> None:
@@ -206,7 +248,7 @@ def validate_model_inputs(tyre_compound: str, track_name: str, feature_names: li
     silently meaningless prediction.
     """
     tyre_compound = str(tyre_compound).strip()
-    track_name    = _normalise_track_name(track_name)
+    track_name    = _normalise_track_name(track_name, feature_names)
 
     tyre_feature  = f'tyre_{tyre_compound}'
     track_feature = f'track_{track_name}'
@@ -235,7 +277,7 @@ def construct_prediction_input(tyre_age: float, lap_number: int, tyre_compound: 
     row stays well-defined.
     """
     tyre_compound = str(tyre_compound).strip()
-    track_name    = _normalise_track_name(track_name)
+    track_name    = _normalise_track_name(track_name, feature_names)
 
     tyre_feature = f'tyre_{tyre_compound}'
     track_feature = f'track_{track_name}'

@@ -261,10 +261,10 @@ async function loadOvertakeOptions() {
             leader.value = ovDrivers[0].code;
             chaser.value = ovDrivers[1].code;
             const lc = ovDrivers.map(d => d.code);
-            if (lc.includes('HAM') && lc.includes('VER')) {
+            if (lc.includes('LEC') && lc.includes('RUS')) {
+                leader.value = 'RUS'; chaser.value = 'LEC';
+            } else if (lc.includes('HAM') && lc.includes('VER')) {
                 leader.value = 'HAM'; chaser.value = 'VER';
-            } else if (lc.includes('LEC') && lc.includes('RUS')) {
-                leader.value = 'LEC'; chaser.value = 'RUS';
             }
         }
         fillSelect('ov-track', ovTracks, '', t => t, 'Pick track...');
@@ -1943,4 +1943,125 @@ async function loadReliabilityTable(toggle) {
         out.innerHTML = `<div class="err-box" style="display:block">Failed to load reliability table: ${err.message}</div>`;
     }
 }
+
+
+// ── FASTF1 OVERTAKE MAP & AUTO-FILL INTEGRATION ────────────────────────────
+async function htAutoFillOvertake(btn) {
+    const status = document.getElementById('overtake-sync-status');
+    const setStatus = (msg, col) => {
+        if (status) {
+            status.textContent = msg;
+            status.style.color = col || '#9ab';
+            status.style.display = msg ? 'block' : 'none';
+        }
+    };
+    if (btn) { btn.disabled = true; btn.textContent = 'FETCHING…'; }
+    setStatus('Loading FastF1 overtake telemetry...', '#ffd700');
+    try {
+        const res = await fetch('/api/overtake_analysis');
+        const json = await res.json();
+        if (json.status !== 'success' || !json.data) {
+            throw new Error(json.message || 'No overtake telemetry available');
+        }
+        const d = json.data;
+
+        // Auto-fill scenario fields
+        htLiveSyncSetSelect('ov-leader', d.defender); // RUS
+        htLiveSyncSetSelect('ov-chaser', d.attacker); // LEC
+        htLiveSyncSetSelect('ov-track', 'Albert Park Circuit');
+
+        // Year — dispatch change so htUpdateContext picks it up
+        const yrEl = document.getElementById('ov-year');
+        if (yrEl) {
+            yrEl.value = 2026;
+            yrEl.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        // Lap number from overtake data
+        const lapEl = document.getElementById('ov-lap');
+        if (lapEl) lapEl.value = d.lap || 3;
+
+        // Gap — prefer the enriched gap from the API (actual cumulative
+        // lap-time delta), fall back to 0.8s if the API didn't compute it
+        const gap = d._gap_before_s != null ? d._gap_before_s : 0.8;
+        setGapVal(gap);
+
+        // Race length — use the enriched total laps from the DB
+        const raceLapsEl = document.getElementById('ov-racelaps');
+        if (raceLapsEl && d._race_laps) raceLapsEl.value = d._race_laps;
+
+        // Tyre state — populate from enriched DB data when available
+        if (d._enriched && d._tyres) {
+            const lTyre = d._tyres[d.defender];   // leader = defender (was ahead)
+            const cTyre = d._tyres[d.attacker];    // chaser = attacker (was behind)
+            if (lTyre && lTyre.tyre_compound) {
+                const ltSel = document.getElementById('ov-ltyre');
+                if (ltSel && [...ltSel.options].some(o => o.value === lTyre.tyre_compound)) {
+                    ltSel.value = lTyre.tyre_compound;
+                    ltSel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+            if (lTyre && lTyre.tyre_age != null) {
+                const laEl = document.getElementById('ov-lage');
+                if (laEl) laEl.value = Math.round(lTyre.tyre_age);
+            }
+            if (cTyre && cTyre.tyre_compound) {
+                const ctSel = document.getElementById('ov-ctyre');
+                if (ctSel && [...ctSel.options].some(o => o.value === cTyre.tyre_compound)) {
+                    ctSel.value = cTyre.tyre_compound;
+                    ctSel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+            if (cTyre && cTyre.tyre_age != null) {
+                const caEl = document.getElementById('ov-cage');
+                if (caEl) caEl.value = Math.round(cTyre.tyre_age);
+            }
+        }
+
+        // Show overtake map with enriched metadata
+        const container = document.getElementById('ht-overtake-map-container');
+        if (container) {
+            container.style.display = 'block';
+            const metaEl = document.getElementById('ht-overtake-meta');
+            if (metaEl) {
+                const tyreInfo = (d._enriched && d._tyres)
+                    ? ` · ${d.defender} ${d._tyres[d.defender]?.tyre_compound || '?'} age${d._tyres[d.defender]?.tyre_age ?? '?'} vs ${d.attacker} ${d._tyres[d.attacker]?.tyre_compound || '?'} age${d._tyres[d.attacker]?.tyre_age ?? '?'}`
+                    : '';
+                metaEl.innerHTML = `Overtake at <b>${d.overtake_distance_m.toFixed(0)}m</b> on Lap ${d.lap}: <b>${d.attacker}</b> passed <b>${d.defender}</b> (Closest separation: <b>${d.closest_approach.spatial_separation_m.toFixed(2)}m</b>)${tyreInfo}`;
+            }
+        }
+
+        // Resolve sessions so Full-Race Replay works immediately
+        await resolveRaceSessions();
+
+        // Final context update (tyres are now set, so the bar reflects the real state)
+        htUpdateContext();
+
+        setStatus('⚡ Auto-filled from FastF1 telemetry: Australian GP 2026 Lap 3 — ' +
+            (d.defender || '?') + ' vs ' + (d.attacker || '?') +
+            (d._race_laps ? ' · ' + d._race_laps + ' laps' : '') +
+            (d._enriched ? ' · tyres + sessions resolved' : ''), '#2ed573');
+    } catch (err) {
+        setStatus('Error: ' + err.message, '#ff4757');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '⚡ AUTO-FILL FROM FASTF1 OVERTAKE'; }
+    }
+}
+
+// Auto-check track & driver selection to show/hide Overtake Map in Hammer Time
+document.addEventListener('change', e => {
+    if (e.target && (e.target.id === 'ov-track' || e.target.id === 'ov-leader' || e.target.id === 'ov-chaser')) {
+        const track = (document.getElementById('ov-track')?.value || '').toLowerCase();
+        const leader = (document.getElementById('ov-leader')?.value || '').toUpperCase();
+        const chaser = (document.getElementById('ov-chaser')?.value || '').toUpperCase();
+        const container = document.getElementById('ht-overtake-map-container');
+
+        if (container) {
+            const match = track.includes('australia') || track.includes('albert')
+                || (leader && chaser && (leader === 'LEC' || leader === 'RUS') && (chaser === 'LEC' || chaser === 'RUS'));
+            container.style.display = match ? 'block' : 'none';
+        }
+    }
+});
+
 
