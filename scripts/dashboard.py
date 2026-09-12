@@ -26,6 +26,7 @@ from feature_pipeline import (
 import driver_comparison
 import overtake_inference  # import-safe; models load lazily below
 import policy_engine        # import-safe; multi-policy decision engine
+import ai_race_engineer     # AI Race Engineer pit wall strategy transceiver
 import race_calendar  # official calendars 2020-2026 (single source of truth)
 
 # Battery capacity/floor used to express the synthetic ERS trace as a
@@ -273,6 +274,21 @@ def overtake_analysis_api():
         # Graceful fallback — still return the base data
         pass
     return jsonify({'status': 'success', 'data': data})
+
+
+@app.route('/api/overtake_simulation_data')
+def overtake_simulation_data_api():
+    """Return single-lap telemetry points for the animated track map simulation."""
+    json_path = PROJECT_ROOT / 'outputs' / 'australian_gp_2026_simulation_data.json'
+    if not json_path.exists():
+        return jsonify({'status': 'not_found', 'message': 'Simulation data not generated yet.'}), 404
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify({'status': 'success', 'data': data})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 
 
@@ -2060,6 +2076,9 @@ def strategy_policies():
             return jsonify({"error": "perspective must be 'chaser' or "
                                       "'leader'"}), 400
 
+        race_event = str(body.get('race_event') or 'green').lower()
+        traffic_level = str(body.get('traffic_level') or 'Clear')
+
         common = dict(
             leader_code=leader, chaser_code=chaser, track_name=track,
             start_lap=int(body.get('start_lap') or 1),
@@ -2071,6 +2090,8 @@ def strategy_policies():
             chaser_tyre_age=float(body.get('chaser_tyre_age') or 0.0),
             year=year,
             reserve_target_mj=reserve,
+            race_event=race_event,
+            traffic_level=traffic_level,
         )
         if perspective == 'leader':
             # From the leader's seat the battery override is OUR car
@@ -2124,6 +2145,9 @@ def strategy_call():
             return jsonify({"error": "perspective must be 'chaser' or "
                                       "'leader'"}), 400
 
+        race_event = str(body.get('race_event') or 'green').lower()
+        traffic_level = str(body.get('traffic_level') or 'Clear')
+
         def _num(key):
             raw = body.get(key)
             return float(raw) if raw not in (None, "") else None
@@ -2166,12 +2190,74 @@ def strategy_call():
             perspective=seat,
             chaser_shape=_shape('chaser_ers_shape'),
             leader_shape=_shape('leader_ers_shape'),
+            race_event=race_event,
+            traffic_level=traffic_level,
         )
         resp = jsonify(result)
         resp.headers['Cache-Control'] = 'no-store'
         return resp
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ai-race-engineer', methods=['POST'])
+def api_ai_race_engineer():
+    """Consult the AI Race Engineer (LLM Pit Wall Strategy Transceiver)."""
+    try:
+        body = request.get_json() or {}
+        state = body.get('state') or {}
+        call_result = body.get('call_result')
+        api_key = body.get('api_key')
+        provider = body.get('provider') or 'auto'
+        model = body.get('model')
+        base_url = body.get('base_url')
+        online_context = body.get('online_context')
+
+        # If call_result not provided, evaluate it dynamically from state
+        if not call_result and state:
+            leader = str(state.get('leader_code') or '').strip().upper()
+            chaser = str(state.get('chaser_code') or '').strip().upper()
+            track = str(state.get('track_name') or '').strip()
+            seat = str(state.get('perspective') or 'chaser').strip().lower()
+            if leader and chaser and track and leader != chaser:
+                def _num(val):
+                    return float(val) if val not in (None, '') else None
+                year_raw = state.get('year')
+                race_event = str(state.get('race_event') or body.get('race_event') or 'green').lower()
+                traffic_level = str(state.get('traffic_level') or body.get('traffic_level') or 'Clear')
+                call_result = policy_engine.evaluate_call(
+                    leader_code=leader, chaser_code=chaser, track_name=track,
+                    start_lap=int(state.get('start_lap') or 1),
+                    race_length=int(state.get('race_length') or 57),
+                    gap_before_s=float(state.get('gap_before_s') or 0.8),
+                    leader_tyre_compound=state.get('leader_tyre_compound') or 'Medium',
+                    chaser_tyre_compound=state.get('chaser_tyre_compound') or 'Medium',
+                    leader_tyre_age=float(state.get('leader_tyre_age') or 0.0),
+                    chaser_tyre_age=float(state.get('chaser_tyre_age') or 0.0),
+                    year=int(year_raw) if year_raw not in (None, '') else None,
+                    battery_pct=_num(state.get('battery_pct')),
+                    reserve_target_mj=_num(state.get('reserve_target_mj')),
+                    perspective=seat,
+                    race_event=race_event,
+                    traffic_level=traffic_level,
+                )
+
+        if not call_result:
+            return jsonify({"error": "No call result or valid race state provided"}), 400
+
+        result = ai_race_engineer.consult_ai_race_engineer(
+            state=state,
+            call_result=call_result,
+            api_key=api_key,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            online_context=online_context,
+        )
+        return jsonify(result)
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

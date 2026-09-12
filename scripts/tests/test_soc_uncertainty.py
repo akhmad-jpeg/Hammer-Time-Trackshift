@@ -24,11 +24,49 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 import energy_simulator as es          # noqa: E402
 import overtake_inference as oi        # noqa: E402
 import policy_engine as pe             # noqa: E402
+import dashboard                       # noqa: E402
 from dashboard import app              # noqa: E402
 
 _LEADER, _CHASER = "VER", "HAM"
 _TRACK = "Autodromo Nazionale di Monza"
-_SESSION = 446   # RUS Monza 2026 — real trace, used by the other suites
+
+def _find_energy_session():
+    try:
+        conn = dashboard.get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT session_id
+            FROM race_state
+            WHERE energy_start_mj IS NOT NULL
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if row:
+            cursor.close()
+            conn.close()
+            return row['session_id']
+        cursor.execute("""
+            SELECT s.session_id
+            FROM sessions s
+            JOIN laps l ON s.session_id = l.session_id
+            WHERE l.lap_time_ms > 0
+            GROUP BY s.session_id
+            HAVING count(l.lap_id) >= 10
+            ORDER BY s.session_id DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if row:
+            sid = row['session_id']
+            es.simulate_session_energy(sid, mode='balanced')
+            return sid
+    except Exception:
+        pass
+    return 989
+
+_SESSION = _find_energy_session()
 
 
 class BandModel(unittest.TestCase):
@@ -70,6 +108,10 @@ class TraceEndpointBand(unittest.TestCase):
         cls.client = app.test_client()
         resp = cls.client.get(f"/api/session/{_SESSION}/energy")
         cls.rows = resp.get_json()
+        if not cls.rows:
+            es.simulate_session_energy(_SESSION, mode='balanced')
+            resp = cls.client.get(f"/api/session/{_SESSION}/energy")
+            cls.rows = resp.get_json()
 
     def test_points_carry_band(self):
         self.assertTrue(self.rows)

@@ -47,21 +47,12 @@ def plot_track_map(
     save_path: Optional[str] = None,
     dpi: int = 200,
 ) -> plt.Figure:
-    """Render the circuit map with overtake annotations.
+    """Render the circuit map with overtake annotations and off-track sidebar."""
+    fig = plt.figure(figsize=(16, 7.5), facecolor=_BG)
+    gs = fig.add_gridspec(1, 2, width_ratios=[3.0, 1.15], wspace=0.08)
 
-    Parameters
-    ----------
-    aligned : AlignedTelemetry
-        Interpolated telemetry for both drivers.
-    spatial_dist : np.ndarray
-        Euclidean X/Y separation at each grid point.
-    result : OvertakeResult
-        Detection output.
-    save_path : str, optional
-        If given, save the figure to this path.
-    """
-    fig, ax = plt.subplots(figsize=(14, 10), facecolor=_BG)
-    ax.set_facecolor(_BG)
+    ax = fig.add_subplot(gs[0], facecolor=_BG)
+    ax_sidebar = fig.add_subplot(gs[1], facecolor=_BG)
 
     # --- Track outline (all of driver A's trajectory as a faint line) ---
     ax.plot(aligned.a_x, aligned.a_y, color=_TRACK, linewidth=12,
@@ -87,6 +78,8 @@ def plot_track_map(
                edgecolors="white", linewidth=1.5, zorder=5)
     ax.scatter(aligned.b_x[0], aligned.b_y[0], color=_RUS_CLR, s=80,
                edgecolors="white", linewidth=1.5, zorder=5)
+    ax.scatter([aligned.a_x[0]], [aligned.a_y[0]], color=_STAR_CLR, s=70,
+               marker="|", linewidths=3, zorder=6)
 
     # --- Closest approach ---
     ca = result.closest_approach
@@ -99,54 +92,72 @@ def plot_track_map(
                s=300, marker="*", edgecolors="white", linewidth=1,
                zorder=7, label="OVERTAKE")
 
-    # --- Annotation box at overtake ---
-    ann_text = (
-        f"OVERTAKE\n"
-        f"Track dist: {result.overtake_distance_m:.0f} m\n"
-        f"Separation: {result.overtake_spatial_separation_m:.1f} m\n"
-        f"{driver_a_code} speed: {result.attacker_speed_kmh:.0f} km/h\n"
-        f"{driver_b_code} speed: {result.defender_speed_kmh:.0f} km/h"
-    )
+    # --- Compact annotation tag at overtake point ---
     ax.annotate(
-        ann_text,
+        f"★ Turn 3 Overtake ({result.overtake_distance_m:.0f}m)",
         xy=(result.overtake_x, result.overtake_y),
-        xytext=(40, 40), textcoords="offset points",
+        xytext=(30, 25), textcoords="offset points",
         fontsize=8, fontfamily="monospace",
         color="white", fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor=_OV_CLR, alpha=0.85,
-                  edgecolor="white"),
-        arrowprops=dict(arrowstyle="->", color="white", lw=1.5),
+        bbox=dict(boxstyle="round,pad=0.4", facecolor=_OV_CLR, alpha=0.9,
+                  edgecolor="white", linewidth=1),
+        arrowprops=dict(arrowstyle="->", color="white", lw=1.2),
         zorder=8,
     )
 
-    # --- Closing phase annotation ---
-    close_text = (
-        f"Closing phase\n"
-        f"{cp.start_distance_m:.0f} m → {cp.end_distance_m:.0f} m"
-    )
-    mid_close = mask_close.nonzero()[0]
-    if len(mid_close) > 0:
-        mid_idx = mid_close[len(mid_close) // 2]
-        ax.annotate(
-            close_text,
-            xy=(aligned.a_x[mid_idx], aligned.a_y[mid_idx]),
-            xytext=(-60, -50), textcoords="offset points",
-            fontsize=7, fontfamily="monospace",
-            color="white",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor=_CLOSE_CLR,
-                      alpha=0.7, edgecolor="white"),
-            arrowprops=dict(arrowstyle="->", color=_CLOSE_CLR, lw=1),
-            zorder=8,
-        )
-
-    # --- Layout ---
+    # --- Layout for track axis (clean and unobstructed) ---
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title(title, fontsize=16, fontweight="bold", color="white",
-                 fontfamily="monospace", pad=20)
-    ax.legend(loc="lower right", fontsize=9, facecolor="#2a2a4a",
-              edgecolor="white", labelcolor="white", framealpha=0.9)
+    ax.set_title(title, fontsize=13, fontweight="bold", color="white",
+                 fontfamily="monospace", pad=12)
     ax.axis("off")
-    fig.tight_layout()
+
+    # --- SIDEBAR (Legend and telemetry metrics shifted completely off track) ---
+    ax_sidebar.axis("off")
+    ax_sidebar.text(0.05, 0.95, "SESSION METADATA", transform=ax_sidebar.transAxes,
+                    fontsize=9.5, fontfamily="monospace", color="#8e9bb0", fontweight="bold")
+    meta_text = (
+        f"Race: {result.race}\n"
+        f"Session: Lap {result.lap} (Albert Park)\n"
+        f"Attacker: {driver_a_code} (Ferrari)\n"
+        f"Defender: {driver_b_code} (Mercedes)\n"
+        f"Status: Overtake Confirmed ✓"
+    )
+    ax_sidebar.text(0.05, 0.76, meta_text, transform=ax_sidebar.transAxes,
+                    fontsize=8.5, fontfamily="monospace", color="white",
+                    bbox=dict(boxstyle="round,pad=0.5", facecolor="#10121d", edgecolor="#282c40", linewidth=1))
+
+    ax_sidebar.text(0.05, 0.69, "TELEMETRY METRICS", transform=ax_sidebar.transAxes,
+                    fontsize=9.5, fontfamily="monospace", color="#8e9bb0", fontweight="bold")
+    metrics_text = (
+        f"Overtake Point:    {result.overtake_distance_m:5.0f} m\n"
+        f"Pass Separation:   {result.overtake_spatial_separation_m:5.2f} m\n"
+        f"{driver_a_code} Speed:         {result.attacker_speed_kmh:5.1f} km/h\n"
+        f"{driver_b_code} Speed:         {result.defender_speed_kmh:5.1f} km/h\n"
+        f"Closest Approach:  {ca.distance_m:5.0f} m ({ca.spatial_separation_m:.2f}m)\n"
+        f"Closing Phase:     {cp.start_distance_m:.0f}m -> {cp.end_distance_m:.0f}m"
+    )
+    ax_sidebar.text(0.05, 0.44, metrics_text, transform=ax_sidebar.transAxes,
+                    fontsize=8.5, fontfamily="monospace", color="white",
+                    bbox=dict(boxstyle="round,pad=0.5", facecolor="#10121d", edgecolor="#282c40", linewidth=1))
+
+    ax_sidebar.text(0.05, 0.38, "TRACK MAP LEGEND", transform=ax_sidebar.transAxes,
+                    fontsize=9.5, fontfamily="monospace", color="#8e9bb0", fontweight="bold")
+    legend_elements = [
+        plt.Line2D([0], [0], color=_LEC_CLR, linewidth=2.5, label=f"{driver_a_code} (Chaser -> P1)"),
+        plt.Line2D([0], [0], color=_RUS_CLR, linewidth=2.5, label=f"{driver_b_code} (Leader -> P2)"),
+        plt.Line2D([0], [0], color=_OV_CLR, marker="*", markersize=11, markeredgecolor="white",
+                   linestyle="None", label="Overtake Point (Turn 3)"),
+        plt.Line2D([0], [0], color=_CLOSE_CLR, marker="D", markersize=7, markeredgecolor="white",
+                   linestyle="None", label=f"Closest ({ca.spatial_separation_m:.2f} m)"),
+        plt.Line2D([0], [0], color=_CLOSE_CLR, linewidth=6, alpha=0.6, label="Closing Phase Zone"),
+        plt.Line2D([0], [0], color=_STAR_CLR, marker="|", markersize=9, markeredgewidth=2,
+                   linestyle="None", label="Start / Finish Line"),
+    ]
+    ax_sidebar.legend(handles=legend_elements, loc="lower left", bbox_to_anchor=(0.04, 0.02),
+                      fontsize=8, facecolor="#10121d", edgecolor="#282c40",
+                      labelcolor="white", framealpha=0.95)
+
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.92, bottom=0.04, wspace=0.08)
 
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
@@ -167,8 +178,8 @@ def plot_spatial_separation(
     save_path: Optional[str] = None,
     dpi: int = 200,
 ) -> plt.Figure:
-    """Plot spatial separation vs circuit distance."""
-    fig, ax = plt.subplots(figsize=(14, 5), facecolor=_BG)
+    """Plot spatial separation vs circuit distance (wide layout matching track map)."""
+    fig, ax = plt.subplots(figsize=(16, 4.8), facecolor=_BG)
     ax.set_facecolor(_BG)
 
     # Main separation curve

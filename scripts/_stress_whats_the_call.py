@@ -31,6 +31,7 @@ from energy_simulator import battery_uncertainty_band  # noqa: E402
 
 STORE = oi.ERS_STORE_MJ
 FLOOR = oi.LIVE_ATTACK_MIN_SOC_PCT
+ERS_DEFAULT_START_PCT = oi.ERS_DEFAULT_START_PCT
 SPAN = pe.CONFIDENCE_SPAN_S
 EPS = 0.2                                     # pct-points: rounding + phase float
 
@@ -144,13 +145,18 @@ def validate(out, kw, tag):
         check(tag, f"card-{f}-defined", fc[f] is not None, str(fc.get(f)))
 
     # ---- per-row physics: SOC conservation, bands, feasibility ------------
-    # Start battery per seat mapping (evaluate_call's own rule).
+    # Start battery per seat mapping (evaluate_call's own rule), clamped
+    # exactly as the walk clamps it (30-100%: the store never starts below
+    # its floor or above its cap).
+    def _clamped(v):
+        return max(FLOOR, min(100.0, float(v or 62.5)))
+
     if seat == "leader":
-        leader_start = kw.get("battery_pct") or 62.5
-        chaser_start = kw.get("threat_battery_pct") or 62.5
+        leader_start = _clamped(kw.get("battery_pct"))
+        chaser_start = _clamped(kw.get("threat_battery_pct"))
     else:
-        leader_start = 62.5
-        chaser_start = kw.get("battery_pct") or 62.5
+        leader_start = ERS_DEFAULT_START_PCT
+        chaser_start = _clamped(kw.get("battery_pct"))
     reserve_pct = ((kw.get("reserve_target_mj") or pe.RESERVE_TARGET_MJ)
                    / STORE * 100.0)
 

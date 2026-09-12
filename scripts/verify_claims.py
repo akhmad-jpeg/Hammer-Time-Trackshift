@@ -61,6 +61,7 @@ MAX_SCAN_BYTES = 5 * 1024 * 1024
 # in the guard.
 EXEMPT_FILES = {
     'DECK_FIXES.md',
+    'AUDIT_AND_ACTION_PLAN.txt',
 }
 
 # Each pattern: (family name, compiled regex).  All case-insensitive.

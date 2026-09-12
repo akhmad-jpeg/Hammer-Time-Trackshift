@@ -452,19 +452,98 @@
                     </div>
 
                     <div id="ht-overtake-map-container" style="margin-top:16px; background:#0c0f17; border:1px solid #282c37; border-radius:8px; padding:14px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #222; padding-bottom:8px; margin-bottom:12px;">
-                            <span style="font-family:'Russo One', sans-serif; color:var(--f1-gold); font-size:0.95rem;">FASTF1 OVERTAKE SPATIAL TELEMETRY & TRACK MAP</span>
-                            <span id="ht-overtake-meta" style="font-family:'Share Tech Mono', monospace; font-size:0.85rem; color:#aaa;">2026 AUSTRALIAN GP · LAP 3</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #222; padding-bottom:8px; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                            <div>
+                                <span style="font-family:'Russo One', sans-serif; color:var(--f1-gold); font-size:0.95rem;">FASTF1 OVERTAKE TRACK SIMULATION & SPATIAL TELEMETRY</span>
+                                <div id="ht-overtake-meta" style="font-family:'Share Tech Mono', monospace; font-size:0.85rem; color:#aaa; margin-top:2px;">2026 AUSTRALIAN GP · LAP 3 (LEC vs RUS)</div>
+                            </div>
+                            <!-- Mode switch buttons -->
+                            <div style="display:flex; gap:6px;">
+                                <button type="button" id="sim-mode-race-btn" class="f1-btn-sub" onclick="switchOvertakeView('sim')" style="padding:4px 10px; font-size:0.75rem; background:#ff1801; color:#fff; font-weight:bold; border-radius:4px; cursor:pointer;">🏎️ RACE SIMULATION</button>
+                                <button type="button" id="sim-mode-static-btn" class="f1-btn-sub" onclick="switchOvertakeView('static')" style="padding:4px 10px; font-size:0.75rem; background:#1c202c; color:#ccc; border-radius:4px; cursor:pointer;">📊 STATIC ANALYSIS</button>
+                                <button type="button" id="sim-mode-gif-btn" class="f1-btn-sub" onclick="switchOvertakeView('gif')" style="padding:4px 10px; font-size:0.75rem; background:#1c202c; color:#ccc; border-radius:4px; cursor:pointer;">🎬 ANIMATION GIF</button>
+                            </div>
                         </div>
-                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                            <div style="background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:10px;">
-                                <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Circuit Trajectory & Overtake Point</div>
-                                <img id="ht-img-overtake" src="/static/australian_gp_2026_lec_rus_overtake.png" alt="Overtake Track Map" style="width:100%; border-radius:4px; border:1px solid #333;">
+
+                        <!-- 1. LIVE TRACK SIMULATION VIEW -->
+                        <div id="ht-sim-view" style="display:block;">
+                            <!-- Circuit Canvas with HUD overlay -->
+                            <div style="position:relative; background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:8px; overflow:hidden;">
+                                <!-- Live Telemetry HUD -->
+                                <div style="display:flex; justify-content:space-between; align-items:center; background:#0a0d16cc; border:1px solid #222634; border-radius:4px; padding:6px 12px; margin-bottom:8px; font-family:'Share Tech Mono', monospace; font-size:0.82rem; flex-wrap:wrap; gap:8px;">
+                                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                                        <span><b style="color:#aaa;">LAP 3 DISTANCE:</b> <span id="sim-dist-txt" style="color:#fff; font-weight:bold;">0</span> / 5231 m</span>
+                                        <span><b style="color:#e10600;">LEC (CHASER):</b> <span id="sim-lec-spd" style="color:#fff;">--</span> km/h</span>
+                                        <span><b style="color:#27f4d2;">RUS (LEADER):</b> <span id="sim-rus-spd" style="color:#fff;">--</span> km/h</span>
+                                    </div>
+                                    <div style="display:flex; align-items:center; gap:12px;">
+                                        <span><b style="color:#aaa;">SEPARATION:</b> <span id="sim-sep-txt" style="color:#ffd700; font-weight:bold;">--</span> m</span>
+                                        <span id="sim-badge" style="padding:2px 8px; border-radius:4px; background:#111522; border:1px solid #333; color:#fff; font-size:0.75rem; font-weight:bold;">STALKING</span>
+                                    </div>
+                                </div>
+
+                                <!-- Track Canvas -->
+                                <div style="position:relative; width:100%; height:380px; display:flex; justify-content:center; align-items:center; background:#07090f; border-radius:4px;">
+                                    <canvas id="sim-track-canvas" width="900" height="380" style="width:100%; height:100%; border-radius:4px;"></canvas>
+                                </div>
+
+                                <!-- Simulation Control Bar -->
+                                <div style="display:flex; justify-content:space-between; align-items:center; background:#0a0d16; border:1px solid #1c202a; border-radius:4px; padding:6px 12px; margin-top:8px; flex-wrap:wrap; gap:8px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <button type="button" id="sim-play-btn" onclick="toggleTrackSim()" style="background:#ff1801; color:#fff; border:none; padding:4px 12px; border-radius:4px; font-weight:bold; font-size:0.8rem; cursor:pointer;">▶ PLAY</button>
+                                        <button type="button" onclick="restartTrackSim()" style="background:#1c202a; color:#ccc; border:1px solid #333; padding:4px 10px; border-radius:4px; font-size:0.8rem; cursor:pointer;">↺ RESTART</button>
+                                        <span style="font-family:'Share Tech Mono', monospace; font-size:0.75rem; color:#888; margin-left:6px;">SPEED:</span>
+                                        <button type="button" class="sim-spd-btn active" data-spd="1" onclick="setSimSpeed(1)" style="background:#ff1801; color:#fff; border:none; padding:2px 8px; border-radius:3px; font-size:0.75rem; cursor:pointer;">1x</button>
+                                        <button type="button" class="sim-spd-btn" data-spd="2" onclick="setSimSpeed(2)" style="background:#141722; color:#888; border:none; padding:2px 8px; border-radius:3px; font-size:0.75rem; cursor:pointer;">2x</button>
+                                        <button type="button" class="sim-spd-btn" data-spd="4" onclick="setSimSpeed(4)" style="background:#141722; color:#888; border:none; padding:2px 8px; border-radius:3px; font-size:0.75rem; cursor:pointer;">4x</button>
+                                        <button type="button" class="sim-spd-btn" data-spd="8" onclick="setSimSpeed(8)" style="background:#141722; color:#888; border:none; padding:2px 8px; border-radius:3px; font-size:0.75rem; cursor:pointer;">8x</button>
+                                    </div>
+                                    <div style="flex:1; max-width:400px; display:flex; align-items:center; gap:8px;">
+                                        <span style="font-family:'Share Tech Mono', monospace; font-size:0.75rem; color:#888;">PROGRESS:</span>
+                                        <input type="range" id="sim-scrubber" min="0" max="100" value="0" step="0.1" oninput="onSimScrub(this.value)" style="flex:1; accent-color:#ff1801; cursor:pointer;">
+                                    </div>
+                                </div>
                             </div>
-                            <div style="background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:10px;">
-                                <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:6px;">Spatial Separation Profile (m)</div>
-                                <img id="ht-img-distance" src="/static/australian_gp_2026_lec_rus_distance.png" alt="Spatial Separation Profile" style="width:100%; border-radius:4px; border:1px solid #333;">
+
+                            <!-- Post-Completion Spatial Separation Profile (Generates when single lap completes) -->
+                            <div id="sim-completion-panel" style="margin-top:12px; background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:12px; display:none;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid #222; padding-bottom:6px; flex-wrap:wrap; gap:6px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="padding:2px 8px; background:#1e3a29; border:1px solid #52c41a; color:#52c41a; font-size:0.75rem; font-weight:bold; border-radius:4px;">✓ LAP 3 COMPLETED</span>
+                                        <span style="color:#fff; font-size:0.85rem; font-weight:600;">SPATIAL SEPARATION PROFILE GENERATED</span>
+                                    </div>
+                                    <span style="font-family:'Share Tech Mono', monospace; font-size:0.75rem; color:#aaa;">Overtake: <b>469 m</b> · Closest Approach: <b>1,655 m (0.04 m)</b></span>
+                                </div>
+                                <div style="position:relative; width:100%; height:200px; background:#07090f; border-radius:4px;">
+                                    <canvas id="sim-separation-canvas" width="900" height="200" style="width:100%; height:100%; border-radius:4px;"></canvas>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-family:'Share Tech Mono', monospace; font-size:0.75rem; color:#888; flex-wrap:wrap; gap:8px;">
+                                    <span>● Line: Euclidean separation (m)</span>
+                                    <span style="color:#ffd700;">■ Gold Shading: Closing Phase (1,624 m → 1,655 m)</span>
+                                    <span style="color:#ff4ecb;">★ Magenta Star: Overtake point (469 m)</span>
+                                    <span style="color:#fff;">◆ Diamond: Closest approach (0.04 m)</span>
+                                </div>
                             </div>
+                        </div>
+
+                        <!-- 2. STATIC HIGH-RES ANALYSIS VIEW (Graph underneath Track Map) -->
+                        <div id="ht-static-view" style="display:none;">
+                            <div style="display:flex; flex-direction:column; gap:16px;">
+                                <div style="background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:12px;">
+                                    <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:8px;">Circuit Trajectory & Overtake Point (High-Resolution Track Map)</div>
+                                    <img id="ht-img-overtake" src="/static/australian_gp_2026_lec_rus_overtake.png" alt="Overtake Track Map" style="width:100%; max-height:550px; object-fit:contain; border-radius:4px; border:1px solid #282c37;">
+                                </div>
+                                <div style="background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:12px;">
+                                    <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:8px;">Spatial Separation Profile (m) Underneath Track Map</div>
+                                    <img id="ht-img-distance" src="/static/australian_gp_2026_lec_rus_distance.png" alt="Spatial Separation Profile" style="width:100%; max-height:300px; object-fit:contain; border-radius:4px; border:1px solid #282c37;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3. GENERATED GIF / VIDEO VIEW (Large & Unobstructed Track View) -->
+                        <div id="ht-gif-view" style="display:none; background:#05070a; border:1px solid #1f232d; border-radius:6px; padding:14px; text-align:center;">
+                            <div style="color:#fff; font-size:0.85rem; font-weight:600; margin-bottom:10px; text-align:left;">Single-Lap Overtake Animation (Rendered with Matplotlib / FastF1)</div>
+                            <img src="/static/australian_gp_2026_overtake_simulation.gif" alt="Single-Lap Overtake Animation" style="width:100%; max-width:1200px; max-height:850px; object-fit:contain; border-radius:4px; border:1px solid #282c37; box-shadow:0 6px 20px rgba(0,0,0,0.5);">
                         </div>
                     </div>
                 </div>
@@ -564,6 +643,31 @@
                                     placeholder="blank = ~62% band">
                             </div>
                         </div>
+                        <div class="ht-state-grp" id="uc-pit-grp">
+                            <div class="grp-label">SAFETY CAR &amp; PIT RADAR</div>
+                            <div class="field" style="margin:0 0 10px">
+                                <label>Race condition</label>
+                                <div class="po-posture" id="uc-race-event" style="width:100%">
+                                    <button type="button" class="po-persp-btn po-event-btn active" data-event="green" onclick="ucSetRaceEvent(this)" style="flex:1;padding:8px 6px">🟢 GREEN</button>
+                                    <button type="button" class="po-persp-btn po-event-btn" data-event="vsc" onclick="ucSetRaceEvent(this)" style="flex:1;padding:8px 6px">🟡 VSC</button>
+                                    <button type="button" class="po-persp-btn po-event-btn" data-event="safety_car" onclick="ucSetRaceEvent(this)" style="flex:1;padding:8px 6px">🚨 SC</button>
+                                </div>
+                            </div>
+                            <div class="field" style="margin:0 0 10px">
+                                <label>Pit exit traffic</label>
+                                <select id="uc-traffic" onchange="ucScheduleAuto()">
+                                    <option value="Clear" selected>Clear (0.95x transit)</option>
+                                    <option value="Light">Light (1.00x nominal)</option>
+                                    <option value="Heavy">Heavy (1.25x traffic)</option>
+                                </select>
+                            </div>
+                            <div id="uc-pit-metrics" class="pit-metrics-compact">
+                                <div class="pit-metric-row"><span class="pit-k">Net Pit Loss:</span> <span class="pit-v" id="uc-pit-loss-val">--</span></div>
+                                <div class="pit-metric-row"><span class="pit-k">Event Savings:</span> <span class="pit-v" id="uc-pit-saved-val">--</span></div>
+                                <div class="pit-metric-row"><span class="pit-k">Undercut Window:</span> <span class="pit-v" id="uc-undercut-val">--</span></div>
+                                <div class="pit-metric-row"><span class="pit-k">Track SC Rate:</span> <span class="pit-v" id="uc-sc-rate-val">--</span></div>
+                            </div>
+                        </div>
                     </div>
                     <div class="field" style="margin:12px 0 4px">
                         <label id="uc-shape-label">Our ERS sector shape — the chaser's attack (MJ/lap deploy delta per sector)</label>
@@ -576,12 +680,76 @@
                     </div>
                 </div>
             </div>
-            <button class="action-btn" id="uc-run-btn" style="background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px;margin-top:6px" onclick="runUnifiedCall()">⚡ MAKE THE CALL</button>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px">
+                <button class="action-btn" id="uc-run-btn" style="width:auto;margin:0;background:linear-gradient(90deg,#ffd700,#ff9f43);color:#14141a;font-weight:700;padding:12px 22px" onclick="runUnifiedCall()">⚡ MAKE THE CALL</button>
+                <button type="button" class="action-btn" id="ai-eng-consult-btn" style="width:auto;margin:0;background:linear-gradient(90deg,#e10600,#ff4d4d);color:#fff;font-weight:700;padding:12px 20px;display:inline-flex;align-items:center;gap:8px" onclick="consultAiRaceEngineer()">
+                    <span class="radio-dot"></span> 📻 CONSULT AI RACE ENGINEER
+                </button>
+                <button type="button" class="action-btn" id="ai-eng-cfg-toggle-btn" style="width:auto;margin:0;background:#1c1c28;color:#ccc;border:1px solid rgba(255,255,255,0.15);padding:12px 16px" onclick="toggleAiEngineerConfig()">
+                    ⚙️ LLM CONFIG <span id="ai-eng-key-status" style="font-size:0.75em;margin-left:4px;color:#ffd700">● KEY ON HOLD</span>
+                </button>
+                <label style="display:inline-flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:0.7em;color:#9aa;cursor:pointer;margin-left:4px">
+                    <input type="checkbox" id="ai-eng-auto-toggle" onchange="toggleAiAutoConsult(this.checked)"> Auto-consult AI on call
+                </label>
+            </div>
+
+            <!-- Collapsible LLM Config Drawer -->
+            <div id="ai-eng-config-drawer" class="ai-config-drawer" style="display:none">
+                <div class="ai-config-title">
+                    <span>⚙️ AI Race Engineer Transceiver Setup</span>
+                    <button type="button" style="background:transparent;border:none;color:#889;cursor:pointer;font-size:1.1em" onclick="toggleAiEngineerConfig()">✕</button>
+                </div>
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.68em;color:#aaa;margin-bottom:12px;line-height:1.5">
+                    Connect your API key for neural pit wall strategy synthesis. Your key is stored client-side in your browser (<code style="color:#00d2be">localStorage</code>) and never written to disk or server logs. If key is on hold, the system seamlessly uses the local deterministic racecraft engine.
+                </div>
+                <div class="ai-config-grid">
+                    <div class="field" style="margin:0">
+                        <label>Provider</label>
+                        <select id="ai-cfg-provider">
+                            <option value="auto">Auto-Detect from Key</option>
+                            <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+                            <option value="anthropic">Anthropic Claude (Claude 3.5 Sonnet)</option>
+                            <option value="gemini">Google Gemini (Gemini 1.5 Pro / Flash)</option>
+                            <option value="openrouter">OpenRouter (Llama 3.3 70B, DeepSeek, etc.)</option>
+                            <option value="custom">Custom / Local Endpoint (vLLM, Ollama, LMStudio)</option>
+                        </select>
+                    </div>
+                    <div class="field" style="margin:0">
+                        <label>API Key (Stored locally in browser)</label>
+                        <div class="ai-key-input-wrap">
+                            <input type="password" id="ai-cfg-key" placeholder="Paste your API key here (sk-..., AIza...)" autocomplete="off">
+                            <button type="button" class="ai-toggle-vis" onclick="togglePasswordVisibility('ai-cfg-key')" title="Show / Hide">👁️</button>
+                        </div>
+                    </div>
+                    <div class="field" style="margin:0">
+                        <label>Model Override (Optional)</label>
+                        <input type="text" id="ai-cfg-model" placeholder="Default: gpt-4o / claude-3-5-sonnet / gemini-1.5-pro">
+                    </div>
+                    <div class="field" style="margin:0">
+                        <label>Base URL Override (Optional)</label>
+                        <input type="text" id="ai-cfg-base" placeholder="e.g. https://openrouter.ai/api/v1 or http://localhost:11434/v1">
+                    </div>
+                </div>
+                <div class="field" style="margin:0 0 12px">
+                    <label>Online Intelligence &amp; Track Notes (Optional)</label>
+                    <textarea id="ai-cfg-notes" rows="2" style="width:100%;background:#0a0a0f;border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:8px 10px;color:#fff;font-family:'Share Tech Mono',monospace;font-size:0.7em" placeholder="Add any external track notes, live weather, safety car risk, or circuit telemetry observations..."></textarea>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <button type="button" class="action-btn" style="width:auto;margin:0;background:var(--gold);color:#14141a;font-weight:700;padding:8px 18px" onclick="saveAiEngineerConfig()">💾 SAVE CONFIG</button>
+                    <button type="button" class="action-btn" style="width:auto;margin:0;background:#1e2029;color:#ddd;padding:8px 14px" onclick="consultAiRaceEngineer()">🧪 TEST TRANSCEIVER</button>
+                    <button type="button" class="action-btn" style="width:auto;margin:0;background:transparent;border:1px solid rgba(255,107,107,0.4);color:#ff6b6b;padding:8px 14px" onclick="clearAiEngineerKey()">🗑️ CLEAR KEY</button>
+                    <span id="ai-cfg-status" style="font-family:'Share Tech Mono',monospace;font-size:0.7em;margin-left:8px"></span>
+                </div>
+            </div>
+
             <div class="err-box" id="uc-err" style="display:none"></div>
             <div id="uc-out"><div class="chart-note">One call from <b>both</b> engines: the race projection and the five-policy tactical engine are merged. Both seats are evaluated — the leader engine names the defence it would run, and that defence sets the posture the attack policies are scored against — so the call cannot recommend an attack the opponent's own engine would shut down. The seat switch only chooses whose call is surfaced. All ten policies (both seats) stay listed below the call.</div></div>
+
+            <!-- AI RACE ENGINEER OUTPUT WINDOW -->
+            <div id="ai-engineer-window" style="margin-top:16px;"></div>
             <details class="ht-hint" style="margin-top:14px">
                 <summary>ⓘ How the merged call decides</summary>
-                <p>One call from <b>both</b> engines. The <b>race projection</b> walks THIS race forward from the current lap — no replay of a finished race: each driver's career (aggregate) pace model predicts their lap time on the current circuit / tyre context, tyre ages tick up one lap at a time, and the gap moves by the modelled pace edge. Once the chaser is within ~1.2&nbsp;s the per-lap overtake probability is accumulated. The <b>decision engine</b> then rolls five tactical policies (GREEDY ATTACK / BALANCED HOLD / TACTICAL STALK / SAVE &amp; DEFEND / UNDERCUT PREP) through that same simulator and scores them — P(pass) × 6.0&nbsp;s − 2.0&nbsp;s/MJ below reserve − tyre wear − P(fail) × 4.0&nbsp;s − 0.1&nbsp;s/lap deferral. <b>Both seats always run:</b> the leader engine names the defence it would choose, and that choice sets the posture the chaser engine's attack policies are scored against, so the call must beat the opponent's own recommended answer rather than a hand-set toggle. The seat only decides whose call is surfaced as THE CALL. Any policy (either seat) whose store dips below the reserve target or drains to the 30% floor is <b>INFEASIBLE</b>: pruned, never recommended, listed with its reason. Deterministic — the same state always yields the same call — and the payload reports its own latency. No pit-stop or Safety-Car model: tyres run to the flag, so re-run after stops. The <b>ERS sector shape</b> bank uses the Energy Sandbox's exact slider vocabulary: per-sector deploy deltas worth each sector's measured s/MJ, where a zero-sum shape reallocates pace without touching the store and a positive net draws the 4.0 MJ store down to the 30% floor. There is <b>one slider bank, bound to the selected seat</b>: from the chaser seat it expresses every attack policy's lever, from the leader seat it expresses every defence's lever — you always steer the car you selected, never both.</p>
+                <p>One call from <b>both</b> engines. The <b>race projection</b> walks THIS race forward from the current lap — no replay of a finished race: each driver's career (aggregate) pace model predicts their lap time on the current circuit / tyre context, tyre ages tick up one lap at a time, and the gap moves by the modelled pace edge. Once the chaser is within ~1.2&nbsp;s the per-lap overtake probability is accumulated. The <b>decision engine</b> then rolls five tactical policies (GREEDY ATTACK / BALANCED HOLD / TACTICAL STALK / SAVE &amp; DEFEND / UNDERCUT PREP) through that same simulator and scores them — P(pass) × 6.0&nbsp;s − 2.0&nbsp;s/MJ below reserve − tyre wear − P(fail) × 4.0&nbsp;s − 0.1&nbsp;s/lap deferral − VSC/SC pit stop transit savings. <b>Both seats always run:</b> the leader engine names the defence it would choose, and that choice sets the posture the chaser engine's attack policies are scored against, so the call must beat the opponent's own recommended answer rather than a hand-set toggle. The seat only decides whose call is surfaced as THE CALL. Any policy (either seat) whose store dips below the reserve target or drains to the 30% floor is <b>INFEASIBLE</b>: pruned, never recommended, listed with its reason. Deterministic — the same state always yields the same call — and the payload reports its own latency. <b>Dynamic Pit &amp; Safety Car Radar:</b> computes circuit-specific pit loss across 32 circuits, VSC/SC cheap-stop advantages (saving ~9–12s), fresh rubber undercut windows, and empirical historical SC risk tiers. The <b>ERS sector shape</b> bank uses the Energy Sandbox's exact slider vocabulary: per-sector deploy deltas worth each sector's measured s/MJ, where a zero-sum shape reallocates pace without touching the store and a positive net draws the 4.0 MJ store down to the 30% floor. There is <b>one slider bank, bound to the selected seat</b>: from the chaser seat it expresses every attack policy's lever, from the leader seat it expresses every defence's lever — you always steer the car you selected, never both.</p>
             </details>
         </div>
     </div>
@@ -1041,6 +1209,7 @@
     <script src="/static/js/drivers.js"></script>
     <script src="/static/js/whatif.js"></script>
     <script src="/static/js/policies.js"></script>
+    <script src="/static/js/ai_engineer.js"></script>
 </body>
 
 </html>

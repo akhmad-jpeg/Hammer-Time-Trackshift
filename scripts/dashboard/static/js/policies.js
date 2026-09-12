@@ -26,6 +26,18 @@ function ucSeat() {
     return (btn && btn.getAttribute('data-perspective')) || 'chaser';
 }
 
+// Active race condition event ('green', 'vsc', 'safety_car')
+function ucRaceEvent() {
+    const btn = document.querySelector('#uc-race-event .po-event-btn.active');
+    return (btn && btn.getAttribute('data-event')) || 'green';
+}
+
+function ucSetRaceEvent(btn) {
+    document.querySelectorAll('#uc-race-event .po-event-btn')
+        .forEach(b => b.classList.toggle('active', b === btn));
+    ucScheduleAuto();
+}
+
 // Switch seat: CHASER (we attack) vs LEADER (we defend).  Flips the threat
 // input's visibility, the battery label's meaning and the hero copy.  The
 // scenario inputs (drivers / track / lap / gap / tyres / battery) are shared.
@@ -133,6 +145,8 @@ function ucState() {
         // The seat chooses whose call is surfaced; both engines always run
         // and the leader engine's recommendation conditions the posture.
         perspective: ucSeat(),
+        race_event: ucRaceEvent(),
+        traffic_level: htVal('uc-traffic') || 'Clear',
     };
     // OUR battery: the seat's own car (MJ of the 4.0 MJ store).
     const batt = ucMjToPct(htVal('ov-ers-batt'));
@@ -237,6 +251,30 @@ function ucRenderCall(data) {
             <span style="font-family:'Share Tech Mono',monospace;font-size:0.62em;letter-spacing:1px;color:#667">
                 ${data.latency_ms.toFixed(0)} ms${(data.engine_cache && (data.engine_cache.leader_reused || data.engine_cache.chaser_reused)) ? ' · re-used stored engine evaluation (same state)' : ' · fresh walk simulation'} — deterministic, same state = same call</span>
         </div>
+        ${data.pit_analysis ? `
+        <div class="hc-pit-radar" style="margin-top:12px;padding:9px 14px;background:rgba(255,255,255,0.025);border:1px solid rgba(255,255,255,0.09);border-radius:6px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;font-family:'Share Tech Mono',monospace;font-size:0.7em">
+            <div>
+                <span style="color:#889">PIT RADAR:</span> 
+                <b style="color:#fff">${data.pit_analysis.effective_pit_loss_s.toFixed(1)}s</b> pit loss 
+                <span class="po-risk" style="padding:1px 6px;font-size:0.85em;${data.pit_analysis.is_cheap_stop ? 'color:#00ff88;border-color:#00ff88' : 'color:#889;border-color:#555'}">
+                    ${data.pit_analysis.race_event.toUpperCase()} ${data.pit_analysis.is_cheap_stop ? `(SAVE ${data.pit_analysis.time_saved_s.toFixed(1)}s)` : ''}
+                </span>
+            </div>
+            <div>
+                <span style="color:#889">UNDERCUT:</span> 
+                <b style="${data.pit_analysis.undercut && data.pit_analysis.undercut.status === 'OPEN_FAVORABLE' ? 'color:#00ff88' : (data.pit_analysis.undercut && data.pit_analysis.undercut.status === 'MARGINAL' ? 'color:#ffd700' : 'color:#ff6b6b')}">
+                    ${data.pit_analysis.undercut ? data.pit_analysis.undercut.status : 'N/A'}
+                </b> 
+                ${data.pit_analysis.undercut ? `(${data.pit_analysis.undercut.net_exit_margin_s >= 0 ? '+' : ''}${data.pit_analysis.undercut.net_exit_margin_s.toFixed(1)}s buffer)` : ''}
+            </div>
+            <div>
+                <span style="color:#889">TRACK SC PROB:</span> 
+                <b style="color:${data.pit_analysis.sc_risk_tier === 'HIGH' ? '#ff4d4d' : (data.pit_analysis.sc_risk_tier === 'MEDIUM' ? '#ffd700' : '#00d2be')}">
+                    ${Math.round((data.pit_analysis.sc_probability || 0) * 100)}% (${data.pit_analysis.sc_risk_tier})
+                </b>
+            </div>
+        </div>
+        ` : ''}
         <div class="chart-note" style="margin-top:10px">
             <b>BOTH engines ran.</b> The opponent's (${opp.seat}) engine calls
             <b style="color:#ffd700">${opp.action}</b>
@@ -328,6 +366,29 @@ function ucRender(data) {
     const out = document.getElementById('uc-out');
     if (!out) return;
     out.innerHTML = ucRenderCall(data) + ucRenderPolicies(data);
+
+    // Sync compact pit metrics in the state grid
+    const pa = data.pit_analysis;
+    if (pa) {
+        const lossEl = document.getElementById('uc-pit-loss-val');
+        if (lossEl) lossEl.innerHTML = `<b>${pa.effective_pit_loss_s.toFixed(1)}s</b> (${pa.race_event.toUpperCase()})`;
+        const savedEl = document.getElementById('uc-pit-saved-val');
+        if (savedEl) savedEl.innerHTML = pa.is_cheap_stop 
+            ? `<span style="color:#00ff88;font-weight:bold">+${pa.time_saved_s.toFixed(1)}s SAVED</span>` 
+            : `<span style="color:#889">0.0s (Nominal)</span>`;
+        const ucEl = document.getElementById('uc-undercut-val');
+        if (ucEl && pa.undercut) {
+            const u = pa.undercut;
+            const uColor = u.status === 'OPEN_FAVORABLE' ? '#00ff88' : (u.status === 'MARGINAL' ? '#ffd700' : '#ff4d4d');
+            ucEl.innerHTML = `<span style="color:${uColor};font-weight:bold">${u.status}</span> (${u.net_exit_margin_s >= 0 ? '+' : ''}${u.net_exit_margin_s.toFixed(1)}s)`;
+        }
+        const scEl = document.getElementById('uc-sc-rate-val');
+        if (scEl) {
+            const scRate = Math.round((pa.sc_probability || 0) * 100);
+            const rColor = pa.sc_risk_tier === 'HIGH' ? '#ff4d4d' : (pa.sc_risk_tier === 'MEDIUM' ? '#ffd700' : '#00d2be');
+            scEl.innerHTML = `<span style="color:${rColor};font-weight:bold">${scRate}%</span> (${pa.sc_risk_tier})`;
+        }
+    }
 }
 
 // ── The call ─────────────────────────────────────────────────────────────
@@ -399,7 +460,11 @@ async function runUnifiedCall(fromAuto) {
         const data = await res.json();
         if (seq !== ucSeq) return;          // a newer run owns the panel
         if (data.error) throw new Error(data.error);
+        window.lastUcData = data;
         ucRender(data);
+        if (typeof consultAiRaceEngineer === 'function' && localStorage.getItem('ht_llm_auto_consult') === 'true') {
+            consultAiRaceEngineer(true);
+        }
     } catch (e) {
         if (seq !== ucSeq) return;
         if (err) { err.textContent = 'Call error: ' + e.message; err.style.display = 'block'; }
@@ -428,6 +493,7 @@ const UC_AUTO_IDS = new Set([
     'ov-lap', 'ov-racelaps', 'ov-gap',
     'ov-ltyre', 'ov-ctyre', 'ov-lage', 'ov-cage',
     'ov-ers-batt', 'uc-reserve', 'uc-threat-batt',
+    'uc-traffic',
 ]);
 
 // The slider bank carries its own oninput (ucSectorInput for the live Σ);

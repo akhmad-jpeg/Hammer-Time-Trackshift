@@ -83,6 +83,7 @@ from overtake_inference import (  # noqa: E402
     LIVE_ATTACK_MIN_SOC_PCT,
 )
 from energy_simulator import battery_uncertainty_band  # noqa: E402
+import pit_strategy  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Tunable scoring constants — the whole utility function in one block, so a
@@ -196,6 +197,8 @@ def _engine_cache_key(engine: str, *, posture=None, **kw) -> tuple:
         (tuple(shape) if shape is not None else None),
         (tuple(l_shape) if l_shape is not None else None),
         (tuple(t_shape) if t_shape is not None else None),
+        str(kw.get("race_event") or "green").lower(),
+        str(kw.get("traffic_level") or "Clear"),
     )
 
 
@@ -298,7 +301,15 @@ def _phase_vector(shape, net_mj: float) -> list[float] | None:
         return _lever(net_mj)
     net0 = _shape_net(vec)
     if abs(net0) > 1e-9:
-        return _scale_shape(vec, net_mj / net0)
+        scaled = _scale_shape(vec, net_mj / net0)
+        # A real shape scaled to a zero ask lands on the same EXPLICIT
+        # store-neutral posture as the no-shape zero ask below: the SOC
+        # walk stays on (battery margin defined) at Balanced pace.  A
+        # collapse to None would silently turn the walk OFF and fabricate
+        # an unmodelled trajectory.
+        if scaled is None:
+            return [0.0, 0.0, 0.0]
+        return scaled
     flat = _lever(net_mj) if net_mj else None
     if flat is None:
         return vec
@@ -432,6 +443,8 @@ def evaluate_tactical_policies(
         reserve_target_mj: float | None = None,
         leader_posture: str = "balanced",
         chaser_shape=None,
+        race_event: str = "green",
+        traffic_level: str = "Clear",
 ) -> dict[str, Any]:
     """Evaluate all five policies against one race state.
 
@@ -446,6 +459,10 @@ def evaluate_tactical_policies(
     phase, sector spread preserved) and the payload discloses it under
     ``ers_shape``; the net-0 reallocation case stays active and
     store-neutral, turning the SOC walk on for BALANCED HOLD too.
+
+    ``race_event`` ('green', 'vsc', 'safety_car') and ``traffic_level``
+    ('Clear', 'Light', 'Heavy') inject circuit-specific pit loss times,
+    Safety Car intervention likelihood, and fresh-tyre undercut window math.
 
     Returns the full comparison payload: per-policy rows (score components,
     pass lap, energy cost, SOC trajectory stats, feasibility), the ranked
@@ -463,6 +480,25 @@ def evaluate_tactical_policies(
     reserve = (RESERVE_TARGET_MJ if reserve_target_mj is None
                else float(reserve_target_mj))
     horizon = max(0, race_length - start_lap)
+
+    # Pit lane delta & Safety Car evaluations
+    pit_summary = pit_strategy.calculate_pit_loss(track_name, event=race_event, traffic=traffic_level)
+    undercut_eval = pit_strategy.evaluate_undercut_window(
+        gap_s=gap_before_s,
+        chaser_tyre=chaser_tyre_compound,
+        chaser_age=chaser_tyre_age,
+        leader_tyre=leader_tyre_compound,
+        leader_age=leader_tyre_age,
+        track_name=track_name,
+        event=race_event,
+    )
+    sc_eval = pit_strategy.evaluate_safety_car_opportunity(
+        track_name=track_name,
+        event=race_event,
+        laps_remaining=horizon,
+        current_tyre_age=chaser_tyre_age,
+        gap_ahead_s=gap_before_s,
+    )
 
     # ---- Baseline (no lever): the reference every policy is scored against.
     base_sim, _ = _run_phase(leader_code, chaser_code, track_name, start_lap,
@@ -485,8 +521,12 @@ def evaluate_tactical_policies(
                                  chaser_shape=chaser_shape)
             call, summ = sim["call"], sim["summary"]
             soc_end_pct = summ.get("chaser_soc_end_pct")
-            min_soc_pct = min((l.get("chaser_soc_pct", 100.0)
-                               for l in sim["laps"]), default=None)
+            # Only laps the SOC walk actually recorded — a row whose walk
+            # is off has no trajectory to report (never fabricate a 100%
+            # minimum the car never modelled).
+            c_soc_rows = [l["chaser_soc_pct"] for l in sim["laps"]
+                          if l.get("chaser_soc_pct") is not None]
+            min_soc_pct = min(c_soc_rows) if c_soc_rows else None
             deployed = summ.get("ers_deployed_mj", 0.0)
             banked = summ.get("ers_banked_mj", 0.0)
             energy_limited = summ.get("ers_energy_limited_laps", 0)
@@ -565,7 +605,10 @@ def evaluate_tactical_policies(
         # breach rule rejects policies that SPEND below the target — a car
         # sitting under target must still get the hold advice.
         if soc_end_pct is None:
-            soc_end_pct = round(min(100.0, batt_pct), 1)
+            # Mirror the walk's own start clamp (30-100%): a reported store
+            # never sits below the floor the walk itself enforces.
+            soc_end_pct = round(min(100.0, max(LIVE_ATTACK_MIN_SOC_PCT,
+                                               batt_pct)), 1)
 
         # ---- SOC uncertainty (the battery is a synthesized estimate).
         # The band grows with laps since the projection's anchor (race
@@ -589,6 +632,19 @@ def evaluate_tactical_policies(
         # ---- Score components (all in race-time seconds; lower is better
         # except the pass reward, which enters negatively as a gain).
         pass_gain = cum * PASS_VALUE_S
+
+        # Undercut & Safety Car / Pit Window integration:
+        why_text = pol["why"]
+        if pol["name"] == "UNDERCUT PREP":
+            if pit_summary.get("is_cheap_stop"):
+                # Pitting under VSC / SC saves significant race time (~9-12s)
+                time_saved = pit_summary.get("time_saved_s", 0.0)
+                pass_gain += time_saved
+                why_text = f"BOX UNDER {pit_summary.get('event', 'VSC')} — exploit cheap stop saving ~{time_saved:.1f}s on transit"
+            elif undercut_eval.get("status") in ("OPEN_FAVORABLE", "MARGINAL"):
+                undercut_gain = max(0.0, undercut_eval.get("net_exit_margin_s", 0.0)) * 1.5
+                pass_gain += undercut_gain
+                why_text = f"undercut window open: fresh out-lap edge +{undercut_eval.get('fresh_tyre_outlap_gain_s', 1.8):.1f}s clears {gap_before_s:.1f}s gap (+{undercut_eval.get('net_exit_margin_s', 0.0):.1f}s on exit)"
 
         # Tyre cost: extra health burned vs the Balanced baseline, priced
         # per phase in the branch above (on the CHASER's compound).
@@ -616,7 +672,7 @@ def evaluate_tactical_policies(
 
         rows.append({
             "policy": pol["name"],
-            "why": pol["why"],
+            "why": why_text,
             "deploy_lap": deploy_lap if pol["deploy_offset"] else None,
             "verdict": call.get("verdict"),
             "verdict_reason": call.get("verdict_reason"),
@@ -756,6 +812,18 @@ def evaluate_tactical_policies(
         },
         "latency_ms": round(elapsed_ms, 1),
         "latency_budget_ms": LATENCY_BUDGET_MS,
+        "pit_analysis": {
+            "race_event": pit_summary["event"],
+            "traffic_level": traffic_level,
+            "effective_pit_loss_s": pit_summary["effective_pit_loss_s"],
+            "baseline_green_s": pit_summary["baseline_green_s"],
+            "time_saved_s": pit_summary["time_saved_s"],
+            "is_cheap_stop": pit_summary["is_cheap_stop"],
+            "sc_probability": pit_summary["sc_probability"],
+            "sc_risk_tier": pit_summary["sc_risk_tier"],
+            "undercut": undercut_eval,
+            "safety_car": sc_eval,
+        },
     }
 
 
@@ -955,6 +1023,8 @@ def evaluate_leader_policies(
         leader_battery_pct: float | None = None,
         reserve_target_mj: float | None = None,
         leader_shape=None, threat_shape=None,
+        race_event: str = "green",
+        traffic_level: str = "Clear",
 ) -> dict[str, Any]:
     """Evaluate five DEFENCE policies for the leader against one threat.
 
@@ -968,6 +1038,9 @@ def evaluate_leader_policies(
     policy lever; ``threat_shape`` runs the attacking chaser on its slider
     bank instead of the flat default lever.  Both may be net-0
     reallocations (active, store-neutral).
+
+    ``race_event`` and ``traffic_level`` inject real pit lane delta loss
+    and Safety Car intervention likelihood.
 
     The ACTION card answers: how do I keep this position, what does the
     threat look like under that answer, and what does the defence cost?
@@ -985,6 +1058,8 @@ def evaluate_leader_policies(
                else float(reserve_target_mj))
     horizon = max(0, race_length - start_lap)
     band = battery_uncertainty_band(horizon)
+
+    pit_summary = pit_strategy.calculate_pit_loss(track_name, event=race_event, traffic=traffic_level)
 
     rows = []
     base_summ = None
@@ -1046,6 +1121,26 @@ def evaluate_leader_policies(
                         if l.get("leader_soc_pct") is not None]
             summ = dict(summ)
             summ["_phase1_soc_rows"] = stitched
+            # Phase-1's store flow counts in the row's energy figures
+            # (mirrors the chaser engine's two-phase accumulation): BANK &
+            # STRIKE banks in phase 1 and strikes in phase 2 — dropping
+            # phase-1's banked MJ made the row's deployed/banked figures
+            # disagree with its own soc_end_pct.
+            d1 = sim1["summary"].get("leader_defense") or {}
+            d2 = summ.get("leader_defense") or {}
+            head = d2 or d1
+            summ["leader_defense"] = {
+                "posture": head.get("posture"),
+                "net_mj_per_lap": head.get("net_mj_per_lap"),
+                "deployed_mj": round(float(d1.get("deployed_mj", 0.0))
+                                     + float(d2.get("deployed_mj", 0.0)), 3),
+                "banked_mj": round(float(d1.get("banked_mj", 0.0))
+                                   + float(d2.get("banked_mj", 0.0)), 3),
+                "energy_limited_laps": (int(d1.get("energy_limited_laps", 0))
+                                        + int(d2.get("energy_limited_laps",
+                                                     0))),
+                "pace_s_per_lap": head.get("pace_s_per_lap"),
+            }
             ms_total = ms1 + ms2
 
         cum = float(sim["call"].get("cumulative_probability") or 0.0)
@@ -1068,7 +1163,9 @@ def evaluate_leader_policies(
         # no-spend posture is never priced as a reserve breach: the
         # breach rule rejects policies that SPEND below the target.
         if soc_end_pct is None:
-            soc_end_pct = round(min(100.0, lbatt), 1)
+            # Mirror the walk's own start clamp (30-100%), as chaser-side.
+            soc_end_pct = round(min(100.0, max(LIVE_ATTACK_MIN_SOC_PCT,
+                                               lbatt)), 1)
         deployed = summ.get("leader_defense", {}) or {}
         deployed_mj = float(deployed.get("deployed_mj", 0.0))
         banked_mj = float(deployed.get("banked_mj", 0.0))
@@ -1271,6 +1368,16 @@ def evaluate_leader_policies(
         },
         "latency_ms": round(elapsed_ms, 1),
         "latency_budget_ms": LATENCY_BUDGET_MS,
+        "pit_analysis": {
+            "race_event": pit_summary["event"],
+            "traffic_level": traffic_level,
+            "effective_pit_loss_s": pit_summary["effective_pit_loss_s"],
+            "baseline_green_s": pit_summary["baseline_green_s"],
+            "time_saved_s": pit_summary["time_saved_s"],
+            "is_cheap_stop": pit_summary["is_cheap_stop"],
+            "sc_probability": pit_summary["sc_probability"],
+            "sc_risk_tier": pit_summary["sc_risk_tier"],
+        },
     }
 
 
@@ -1360,7 +1467,9 @@ def evaluate_call(
         threat_battery_pct: float | None = None,
         reserve_target_mj: float | None = None,
         perspective: str = "chaser",
-        chaser_shape=None, leader_shape=None) -> dict[str, Any]:
+        chaser_shape=None, leader_shape=None,
+        race_event: str = "green",
+        traffic_level: str = "Clear") -> dict[str, Any]:
     """One merged call: both engines run, coupled, one decision out.
 
     ``battery_pct`` is OUR car's battery (the seat's own car) and
@@ -1374,6 +1483,10 @@ def evaluate_call(
     carries the shapes it was scored under, and the cache keys on the
     normalised vectors so a changed slider bank can never serve a stale
     call.
+
+    ``race_event`` ('green', 'vsc', 'safety_car') and ``traffic_level``
+    ('Clear', 'Light', 'Heavy') inject circuit-specific pit loss times,
+    Safety Car intervention likelihood, and fresh-tyre undercut window math.
 
     Returns the single ``final_call`` card for the chosen seat (carrying the
     opponent engine's answer and the projected race window), every policy
@@ -1404,6 +1517,7 @@ def evaluate_call(
         chaser_tyre_compound=chaser_tyre_compound,
         leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
         year=year, reserve_target_mj=reserve_target_mj,
+        race_event=race_event, traffic_level=traffic_level,
     )
     reserve = (RESERVE_TARGET_MJ if reserve_target_mj is None
                else float(reserve_target_mj))
@@ -1425,7 +1539,8 @@ def evaluate_call(
         leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
         year=year, leader_batt=leader_batt, chaser_batt=chaser_batt,
         reserve=reserve, leader_shape=leader_shape_vec,
-        threat_shape=chaser_shape_vec)
+        threat_shape=chaser_shape_vec,
+        race_event=race_event, traffic_level=traffic_level)
     leader_out = _engine_cache_get(leader_key)
     leader_cached = leader_out is not None
     if leader_out is None:
@@ -1449,7 +1564,8 @@ def evaluate_call(
         chaser_tyre_compound=chaser_tyre_compound,
         leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
         year=year, leader_batt=leader_batt, chaser_batt=chaser_batt,
-        reserve=reserve, posture=posture, chaser_shape=chaser_shape_vec)
+        reserve=reserve, posture=posture, chaser_shape=chaser_shape_vec,
+        race_event=race_event, traffic_level=traffic_level)
     chaser_out = _engine_cache_get(chaser_key)
     chaser_cached = chaser_out is not None
     if chaser_out is None:
@@ -1552,6 +1668,7 @@ def evaluate_call(
         },
         "latency_ms": round(elapsed_ms, 1),
         "latency_budget_ms": CALL_LATENCY_BUDGET_MS,
+        "pit_analysis": chaser_out.get("pit_analysis"),
         "engine_cache": {
             "leader_reused": leader_cached,
             "chaser_reused": chaser_cached,

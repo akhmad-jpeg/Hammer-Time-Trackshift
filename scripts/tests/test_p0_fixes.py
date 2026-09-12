@@ -32,9 +32,30 @@ import overtake_inference as oi            # noqa: E402
 import dashboard                            # noqa: E402
 from dashboard import app                   # noqa: E402  (loads models + config)
 
-# Monza 2026-09-06 race session with real telemetry (RUS, 50 laps) — used
-# by validate_features.py too, so it is known-good for the sandbox route.
-SANDBOX_SESSION = 446
+def _find_sandbox_session():
+    try:
+        conn = dashboard.get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT s.session_id
+            FROM sessions s
+            JOIN laps l ON s.session_id = l.session_id
+            WHERE l.lap_time_ms > 0
+            GROUP BY s.session_id
+            HAVING count(l.lap_id) >= 10
+            ORDER BY s.session_id DESC
+            LIMIT 1
+        """)
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if row:
+            return row['session_id']
+    except Exception:
+        pass
+    return 989
+
+SANDBOX_SESSION = _find_sandbox_session()
 
 _LEADER, _CHASER = "VER", "HAM"
 _TRACK = "Autodromo Nazionale di Monza"

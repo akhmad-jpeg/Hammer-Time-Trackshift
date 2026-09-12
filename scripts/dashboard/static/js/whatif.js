@@ -2060,8 +2060,515 @@ document.addEventListener('change', e => {
             const match = track.includes('australia') || track.includes('albert')
                 || (leader && chaser && (leader === 'LEC' || leader === 'RUS') && (chaser === 'LEC' || chaser === 'RUS'));
             container.style.display = match ? 'block' : 'none';
+            if (match) ensureTrackSimLoaded();
         }
     }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACK SIMULATION & POST-COMPLETION SPATIAL SEPARATION PROFILE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let trackSimData = null;
+let simRunning = false;
+let simProgress = 0;          // 0 to 1 (progress along lap)
+let simSpeed = 1.0;
+let simRafId = null;
+let simLastTimestamp = null;
+let simProfileDrawn = false;
+
+window.switchOvertakeView = function(mode) {
+    const simView = document.getElementById('ht-sim-view');
+    const staticView = document.getElementById('ht-static-view');
+    const gifView = document.getElementById('ht-gif-view');
+    const raceBtn = document.getElementById('sim-mode-race-btn');
+    const staticBtn = document.getElementById('sim-mode-static-btn');
+    const gifBtn = document.getElementById('sim-mode-gif-btn');
+
+    if (simView) simView.style.display = mode === 'sim' ? 'block' : 'none';
+    if (staticView) staticView.style.display = mode === 'static' ? 'block' : 'none';
+    if (gifView) gifView.style.display = mode === 'gif' ? 'block' : 'none';
+
+    const setBtn = (btn, active) => {
+        if (!btn) return;
+        btn.style.background = active ? '#ff1801' : '#1c202c';
+        btn.style.color = active ? '#fff' : '#ccc';
+        btn.style.fontWeight = active ? 'bold' : 'normal';
+    };
+    setBtn(raceBtn, mode === 'sim');
+    setBtn(staticBtn, mode === 'static');
+    setBtn(gifBtn, mode === 'gif');
+
+    if (mode === 'sim') {
+        ensureTrackSimLoaded();
+    }
+};
+
+window.setSimSpeed = function(spd) {
+    simSpeed = Number(spd) || 1.0;
+    document.querySelectorAll('.sim-spd-btn').forEach(btn => {
+        const active = Number(btn.dataset.spd) === simSpeed;
+        btn.style.background = active ? '#ff1801' : '#141722';
+        btn.style.color = active ? '#fff' : '#888';
+        btn.style.fontWeight = active ? 'bold' : 'normal';
+    });
+};
+
+window.toggleTrackSim = function() {
+    if (simRunning) {
+        pauseTrackSim();
+    } else {
+        playTrackSim();
+    }
+};
+
+window.playTrackSim = function() {
+    if (!trackSimData) {
+        ensureTrackSimLoaded().then(() => playTrackSim());
+        return;
+    }
+    if (simProgress >= 1.0) {
+        simProgress = 0;
+        simProfileDrawn = false;
+        const compPanel = document.getElementById('sim-completion-panel');
+        if (compPanel) compPanel.style.display = 'none';
+    }
+    simRunning = true;
+    simLastTimestamp = performance.now();
+    const playBtn = document.getElementById('sim-play-btn');
+    if (playBtn) playBtn.textContent = '⏸ PAUSE';
+    if (simRafId) cancelAnimationFrame(simRafId);
+    simRafId = requestAnimationFrame(simStep);
+};
+
+window.pauseTrackSim = function() {
+    simRunning = false;
+    const playBtn = document.getElementById('sim-play-btn');
+    if (playBtn) playBtn.textContent = '▶ PLAY';
+    if (simRafId) { cancelAnimationFrame(simRafId); simRafId = null; }
+};
+
+window.restartTrackSim = function() {
+    pauseTrackSim();
+    simProgress = 0;
+    simProfileDrawn = false;
+    const compPanel = document.getElementById('sim-completion-panel');
+    if (compPanel) compPanel.style.display = 'none';
+    const scrubber = document.getElementById('sim-scrubber');
+    if (scrubber) scrubber.value = 0;
+    renderSimAtProgress(0);
+    playTrackSim();
+};
+
+window.onSimScrub = function(val) {
+    simProgress = Math.min(1.0, Math.max(0, val / 100));
+    renderSimAtProgress(simProgress);
+    if (simProgress >= 1.0 && !simProfileDrawn) {
+        onSimLapComplete();
+    }
+};
+
+async function ensureTrackSimLoaded() {
+    if (trackSimData) {
+        renderSimAtProgress(simProgress);
+        return;
+    }
+    try {
+        const res = await fetch('/api/overtake_simulation_data');
+        const json = await res.json();
+        if (json.status === 'success' && json.data) {
+            trackSimData = json.data;
+            renderSimAtProgress(simProgress);
+        }
+    } catch (e) {
+        console.warn('Track simulation load failed:', e);
+    }
+}
+
+function simStep(now) {
+    if (!simRunning || !trackSimData) return;
+    const dt = (now - simLastTimestamp) / 1000;
+    simLastTimestamp = now;
+
+    // A single lap duration base speed (~22 seconds at 1x)
+    const lapDurationSec = 22.0;
+    simProgress += (dt * simSpeed) / lapDurationSec;
+
+    if (simProgress >= 1.0) {
+        simProgress = 1.0;
+        renderSimAtProgress(1.0);
+        pauseTrackSim();
+        onSimLapComplete();
+        return;
+    }
+
+    renderSimAtProgress(simProgress);
+    simRafId = requestAnimationFrame(simStep);
+}
+
+function renderSimAtProgress(progress) {
+    if (!trackSimData) return;
+    const canvas = document.getElementById('sim-track-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const samples = trackSimData.samples;
+    if (!samples || samples.length === 0) return;
+
+    // Viewport transform: fit all track X/Y into canvas with padding
+    const minX = -7500, maxX = 7800;
+    const minY = -5800, maxY = 12100;
+    const pad = 35;
+    const scale = Math.min((W - 2 * pad) / (maxX - minX), (H - 2 * pad) / (maxY - minY));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    const toCanvas = (x, y) => {
+        const sx = W / 2 + (x - cx) * scale;
+        const sy = H / 2 - (y - cy) * scale;
+        return [sx, sy];
+    };
+
+    // 1. Draw circuit track outline
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Outer asphalt border
+    ctx.beginPath();
+    for (let i = 0; i < samples.length; i++) {
+        const [sx, sy] = toCanvas(samples[i].ax, samples[i].ay);
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = '#222738';
+    ctx.lineWidth = 14;
+    ctx.stroke();
+
+    // Inner track
+    ctx.beginPath();
+    for (let i = 0; i < samples.length; i++) {
+        const [sx, sy] = toCanvas(samples[i].ax, samples[i].ay);
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = '#32374e';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    // Center dashed line
+    ctx.save();
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = '#4a5170';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.restore();
+
+    // Closing Phase highlight on track
+    const cp = trackSimData.closing_phase;
+    if (cp) {
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < samples.length; i++) {
+            if (samples[i].d >= cp.start_distance_m && samples[i].d <= cp.end_distance_m) {
+                const [sx, sy] = toCanvas(samples[i].ax, samples[i].ay);
+                if (!started) { ctx.moveTo(sx, sy); started = true; }
+                else ctx.lineTo(sx, sy);
+            }
+        }
+        ctx.strokeStyle = '#ffd70066';
+        ctx.lineWidth = 14;
+        ctx.stroke();
+    }
+
+    // Overtake Point Star
+    const ovX = trackSimData.overtake_x;
+    const ovY = trackSimData.overtake_y;
+    if (ovX != null && ovY != null) {
+        const [ox, oy] = toCanvas(ovX, ovY);
+        ctx.save();
+        ctx.fillStyle = '#ff4ecb';
+        ctx.shadowColor = '#ff4ecb';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(ox, oy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '10px sans-serif';
+        ctx.fillText('★ Turn 3 Overtake', ox + 8, oy - 4);
+        ctx.restore();
+    }
+
+    // Start / Finish Line
+    const [startSx, startSy] = toCanvas(samples[0].ax, samples[0].ay);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(startSx, startSy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#aaa';
+    ctx.font = '9px "Share Tech Mono", monospace';
+    ctx.fillText('S/F Line', startSx + 6, startSy + 12);
+
+    // 2. Current sample lookup from progress
+    const idx = Math.min(samples.length - 1, Math.floor(progress * (samples.length - 1)));
+    const cur = samples[idx];
+
+    // Draw motion trails
+    const trailCount = 16;
+    for (let t = Math.max(0, idx - trailCount); t < idx; t++) {
+        const alpha = (t - (idx - trailCount)) / trailCount * 0.55;
+        // Chaser trail (Red)
+        const [tax, tay] = toCanvas(samples[t].ax, samples[t].ay);
+        ctx.fillStyle = `rgba(225, 6, 0, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(tax, tay, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Leader trail (Teal)
+        const [tbx, tby] = toCanvas(samples[t].bx, samples[t].by);
+        ctx.fillStyle = `rgba(39, 244, 210, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(tbx, tby, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 3. Draw Leader Dot: RUS (Mercedes Teal)
+    const [bx, by] = toCanvas(cur.bx, cur.by);
+    ctx.save();
+    ctx.shadowColor = '#27f4d2';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#27f4d2';
+    ctx.beginPath();
+    ctx.arc(bx, by, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px "Share Tech Mono", monospace';
+    ctx.fillText('RUS', bx + 9, by + 3);
+    ctx.restore();
+
+    // 4. Draw Chaser Dot: LEC (Ferrari Red)
+    const [ax, ay] = toCanvas(cur.ax, cur.ay);
+    ctx.save();
+    ctx.shadowColor = '#e10600';
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#e10600';
+    ctx.beginPath();
+    ctx.arc(ax, ay, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px "Share Tech Mono", monospace';
+    ctx.fillText('LEC', ax + 9, ay + 3);
+    ctx.restore();
+
+    // 5. Update HUD metrics
+    const distTxt = document.getElementById('sim-dist-txt');
+    const lecSpd = document.getElementById('sim-lec-spd');
+    const rusSpd = document.getElementById('sim-rus-spd');
+    const sepTxt = document.getElementById('sim-sep-txt');
+    const badge = document.getElementById('sim-badge');
+    const scrubber = document.getElementById('sim-scrubber');
+
+    if (distTxt) distTxt.textContent = Math.round(cur.d);
+    if (lecSpd) lecSpd.textContent = Math.round(cur.as);
+    if (rusSpd) rusSpd.textContent = Math.round(cur.bs);
+    if (sepTxt) sepTxt.textContent = cur.sep.toFixed(1);
+    if (scrubber) scrubber.value = (progress * 100).toFixed(1);
+
+    // Dynamic battle status badge
+    if (badge) {
+        const ovDist = trackSimData.overtake_distance_m || 469;
+        if (cur.d < ovDist - 120) {
+            badge.textContent = 'STALKING (RUS LEADING)';
+            badge.style.background = '#0d222a';
+            badge.style.borderColor = '#27f4d2';
+            badge.style.color = '#27f4d2';
+        } else if (cur.d < ovDist + 60) {
+            badge.textContent = '⚡ OVERTAKE: LEC DIVES PAST RUS!';
+            badge.style.background = '#420835';
+            badge.style.borderColor = '#ff4ecb';
+            badge.style.color = '#ff4ecb';
+        } else if (cp && cur.d >= cp.start_distance_m && cur.d <= cp.end_distance_m) {
+            badge.textContent = 'CLOSING PHASE / APEX DEFENSE';
+            badge.style.background = '#362b08';
+            badge.style.borderColor = '#ffd700';
+            badge.style.color = '#ffd700';
+        } else {
+            badge.textContent = 'LEC LEADING (PULLING AWAY)';
+            badge.style.background = '#380907';
+            badge.style.borderColor = '#e10600';
+            badge.style.color = '#ff6b6b';
+        }
+    }
+}
+
+// Event triggered after completion of the single lap
+function onSimLapComplete() {
+    simProfileDrawn = true;
+    const compPanel = document.getElementById('sim-completion-panel');
+    if (compPanel) {
+        compPanel.style.display = 'block';
+        compPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    renderSpatialSeparationProfile();
+}
+
+function renderSpatialSeparationProfile() {
+    if (!trackSimData) return;
+    const canvas = document.getElementById('sim-separation-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const curve = trackSimData.separation_curve || [];
+    if (curve.length === 0) return;
+
+    const maxD = trackSimData.total_distance_m || 5231;
+    let maxSep = 0;
+    for (const pt of curve) if (pt.sep > maxSep) maxSep = pt.sep;
+    maxSep = Math.max(maxSep * 1.15, 100);
+
+    const padL = 50, padR = 25, padT = 20, padB = 35;
+    const toCanvasX = d => padL + (d / maxD) * (W - padL - padR);
+    const toCanvasY = s => H - padB - (s / maxSep) * (H - padT - padB);
+
+    // Grid lines
+    ctx.strokeStyle = '#1d2232';
+    ctx.lineWidth = 1;
+    ctx.font = '9px "Share Tech Mono", monospace';
+    ctx.fillStyle = '#666';
+
+    // Y ticks
+    const ySteps = 4;
+    for (let i = 0; i <= ySteps; i++) {
+        const val = Math.round((maxSep / ySteps) * i);
+        const y = toCanvasY(val);
+        ctx.beginPath();
+        ctx.moveTo(padL, y);
+        ctx.lineTo(W - padR, y);
+        ctx.stroke();
+        ctx.fillText(val + ' m', 8, y + 3);
+    }
+
+    // X ticks
+    const xSteps = 5;
+    for (let i = 0; i <= xSteps; i++) {
+        const val = Math.round((maxD / xSteps) * i);
+        const x = toCanvasX(val);
+        ctx.beginPath();
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, H - padB);
+        ctx.stroke();
+        ctx.fillText(val + ' m', x - 12, H - 15);
+    }
+
+    // Closing phase shading
+    const cp = trackSimData.closing_phase;
+    if (cp) {
+        const x1 = toCanvasX(cp.start_distance_m);
+        const x2 = toCanvasX(cp.end_distance_m);
+        ctx.fillStyle = '#ffd70022';
+        ctx.fillRect(x1, padT, x2 - x1, H - padT - padB);
+        ctx.strokeStyle = '#ffd70088';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x1, padT, x2 - x1, H - padT - padB);
+    }
+
+    // Separation Area Fill
+    ctx.beginPath();
+    ctx.moveTo(toCanvasX(curve[0].d), toCanvasY(0));
+    for (let i = 0; i < curve.length; i++) {
+        ctx.lineTo(toCanvasX(curve[i].d), toCanvasY(curve[i].sep));
+    }
+    ctx.lineTo(toCanvasX(curve[curve.length - 1].d), toCanvasY(0));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(39, 244, 210, 0.12)';
+    ctx.fill();
+
+    // Separation Curve Line
+    ctx.beginPath();
+    for (let i = 0; i < curve.length; i++) {
+        const x = toCanvasX(curve[i].d);
+        const y = toCanvasY(curve[i].sep);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#27f4d2';
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    // Closest approach diamond
+    const ca = trackSimData.closest_approach;
+    if (ca) {
+        const cx = toCanvasX(ca.distance_m);
+        const cy = toCanvasY(ca.separation_m);
+        ctx.save();
+        ctx.fillStyle = '#ffd700';
+        ctx.shadowColor = '#ffd700';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 6);
+        ctx.lineTo(cx + 6, cy);
+        ctx.lineTo(cx, cy + 6);
+        ctx.lineTo(cx - 6, cy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 9px "Share Tech Mono", monospace';
+        ctx.fillText(`Closest (${ca.separation_m.toFixed(2)}m)`, cx - 35, cy - 10);
+        ctx.restore();
+    }
+
+    // Overtake Point Star
+    const ovD = trackSimData.overtake_distance_m;
+    const ovSep = trackSimData.overtake_separation_m;
+    if (ovD != null && ovSep != null) {
+        const ox = toCanvasX(ovD);
+        const oy = toCanvasY(ovSep);
+        ctx.save();
+        ctx.fillStyle = '#ff4ecb';
+        ctx.shadowColor = '#ff4ecb';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(ox, oy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = '#ff4ecb';
+        ctx.font = 'bold 10px "Share Tech Mono", monospace';
+        ctx.fillText(`★ Overtake (${Math.round(ovD)}m)`, ox + 8, oy - 4);
+        ctx.restore();
+    }
+}
+
+// Preload simulation when DOM loads if container exists
+document.addEventListener('DOMContentLoaded', () => {
+    const container = document.getElementById('ht-overtake-map-container');
+    if (container && container.style.display !== 'none') {
+        ensureTrackSimLoaded();
+    }
+});
+
 
 

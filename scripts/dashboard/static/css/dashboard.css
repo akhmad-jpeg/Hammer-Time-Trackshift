@@ -731,7 +731,7 @@
         .ht-hero-kicker { font-family:'Share Tech Mono',monospace; font-size:0.62em; letter-spacing:2px; color:var(--red); }
         .ht-hero-title { font-family:'Barlow Condensed',sans-serif; font-weight:900; font-size:1.7em; letter-spacing:4px; text-transform:uppercase; color:var(--text); line-height:1.05; margin:2px 0 4px; }
         .ht-hero-line { font-family:'Share Tech Mono',monospace; font-size:0.72em; letter-spacing:1px; color:var(--muted); }
-        .ht-state-grid { display:grid; grid-template-columns:1fr; gap:18px; margin:16px 0 4px; }
+        .ht-state-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:18px; margin:16px 0 4px; }
         .ht-state-grp { min-width:0; }
         .ht-inherit { font-family:'Share Tech Mono',monospace; font-size:0.66em; letter-spacing:1px; color:#9ab; background:rgba(255,255,255,0.02); border:1px dashed var(--border); border-radius:4px; padding:6px 10px; margin-bottom:12px; }
         .hero-call { background:linear-gradient(135deg, rgba(255,215,0,0.06), rgba(255,255,255,0.01) 55%); border:1px solid rgba(255,215,0,0.25); border-left:4px solid var(--gold); border-radius:8px; padding:18px 22px; margin-top:14px; }
@@ -835,4 +835,468 @@
 .po-posture-btn:not(.active):hover {
     background: rgba(255, 107, 107, 0.08);
     color: #ff6b6b;
+}
+
+/* Safety Car & Pit Radar Controls */
+.po-event-btn {
+    text-align: center;
+    justify-content: center;
+    white-space: nowrap;
+}
+.po-event-btn[data-event="green"].active {
+    background: linear-gradient(90deg, #00d2be, #00c853);
+    color: #0d1117;
+}
+.po-event-btn[data-event="vsc"].active {
+    background: linear-gradient(90deg, #ffd700, #ff9f43);
+    color: #0d1117;
+}
+.po-event-btn[data-event="safety_car"].active {
+    background: linear-gradient(90deg, #e10600, #ff4d4d);
+    color: #ffffff;
+}
+
+.pit-metrics-compact {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 4px;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68em;
+}
+.pit-metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.pit-k {
+    color: #889;
+}
+.pit-v {
+    color: #fff;
+    font-weight: 500;
+}
+
+/* ==========================================================================
+   AI RACE ENGINEER — PIT WALL STRATEGY TRANSCEIVER
+   ========================================================================== */
+
+.radio-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 8px #00ff88;
+    animation: radio-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes radio-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.9; box-shadow: 0 0 6px #00ff88; }
+    50% { transform: scale(1.35); opacity: 0.4; box-shadow: 0 0 14px #00ff88; }
+}
+
+/* Collapsible LLM Config Drawer */
+.ai-config-drawer {
+    background: #12131a;
+    border: 1px solid rgba(255, 215, 0, 0.28);
+    border-left: 3px solid var(--gold);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin: 12px 0 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    animation: drawer-slide 0.2s ease-out;
+}
+
+@keyframes drawer-slide {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.ai-config-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 0.95em;
+    letter-spacing: 2px;
+    color: var(--gold);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+}
+
+.ai-config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px 16px;
+    margin-bottom: 12px;
+}
+
+.ai-key-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.ai-key-input-wrap input {
+    width: 100%;
+    padding-right: 36px;
+}
+
+.ai-toggle-vis {
+    position: absolute;
+    right: 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1em;
+    color: #889;
+    padding: 2px 4px;
+}
+
+.ai-toggle-vis:hover {
+    color: #fff;
+}
+
+/* AI Race Engineer Transceiver Window */
+.ai-eng-window {
+    background: linear-gradient(145deg, #0e1017, #07090f 70%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-left: 4px solid var(--red);
+    border-radius: 8px;
+    padding: 20px 22px;
+    margin-top: 18px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    position: relative;
+    overflow: hidden;
+}
+
+.ai-eng-window::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 220px;
+    height: 100%;
+    background: repeating-linear-gradient(-65deg, transparent, transparent 10px, rgba(225, 6, 0, 0.03) 10px, rgba(225, 6, 0, 0.03) 20px);
+    pointer-events: none;
+}
+
+.ai-eng-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+}
+
+.ai-eng-channel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ai-eng-callsign {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 1.1em;
+    letter-spacing: 2px;
+    color: #fff;
+    text-transform: uppercase;
+}
+
+.ai-eng-freq {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.64em;
+    letter-spacing: 1.5px;
+    color: #00d2be;
+    background: rgba(0, 210, 190, 0.08);
+    border: 1px solid rgba(0, 210, 190, 0.3);
+    border-radius: 3px;
+    padding: 2px 7px;
+}
+
+.ai-eng-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ai-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.62em;
+    letter-spacing: 1.2px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    text-transform: uppercase;
+}
+
+.ai-badge-source {
+    background: rgba(0, 255, 136, 0.08);
+    border: 1px solid rgba(0, 255, 136, 0.35);
+    color: #00ff88;
+}
+
+.ai-badge-source.offline {
+    background: rgba(255, 215, 0, 0.08);
+    border: 1px solid rgba(255, 215, 0, 0.35);
+    color: #ffd700;
+}
+
+.ai-badge-conf {
+    background: rgba(255, 107, 107, 0.08);
+    border: 1px solid rgba(255, 107, 107, 0.35);
+    color: #ff6b6b;
+}
+
+.ai-badge-conf.high {
+    background: rgba(0, 200, 83, 0.1);
+    border-color: #00c853;
+    color: #00c853;
+}
+
+/* Radio Transmission Quote HUD */
+.ai-radio-card {
+    background: linear-gradient(90deg, rgba(225, 6, 0, 0.12), rgba(18, 19, 26, 0.8) 50%, rgba(20, 20, 30, 0.4));
+    border: 1px solid rgba(225, 6, 0, 0.4);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 16px;
+    position: relative;
+    box-shadow: inset 0 0 20px rgba(225, 6, 0, 0.06);
+}
+
+.ai-radio-hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.ai-radio-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65em;
+    letter-spacing: 2px;
+    color: #ff6b6b;
+    font-weight: 700;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Equalizer Bars */
+.ai-eq-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 14px;
+}
+
+.ai-eq-bar {
+    width: 3px;
+    background: #ff6b6b;
+    border-radius: 1px;
+    animation: eq-bounce 1s ease-in-out infinite;
+}
+
+.ai-eq-bar:nth-child(1) { height: 40%; animation-delay: 0.1s; }
+.ai-eq-bar:nth-child(2) { height: 85%; animation-delay: 0.3s; }
+.ai-eq-bar:nth-child(3) { height: 60%; animation-delay: 0.15s; }
+.ai-eq-bar:nth-child(4) { height: 100%; animation-delay: 0.45s; }
+.ai-eq-bar:nth-child(5) { height: 50%; animation-delay: 0.25s; }
+
+@keyframes eq-bounce {
+    0%, 100% { transform: scaleY(0.4); }
+    50% { transform: scaleY(1); }
+}
+
+.ai-radio-quote {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.02em;
+    line-height: 1.45;
+    color: #fff;
+    font-style: italic;
+    letter-spacing: 0.5px;
+    margin: 4px 0 2px;
+}
+
+/* Definitive Call Card */
+.ai-def-call {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 215, 0, 0.25);
+    border-radius: 6px;
+    padding: 12px 18px;
+    margin-bottom: 16px;
+}
+
+.ai-def-mode {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 1.6em;
+    letter-spacing: 4px;
+    color: var(--gold);
+    text-transform: uppercase;
+    line-height: 1.1;
+}
+
+.ai-def-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68em;
+    letter-spacing: 1.5px;
+    color: #aaa;
+    margin-top: 4px;
+}
+
+.ai-def-badge {
+    text-align: right;
+}
+
+.ai-def-score {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 2em;
+    color: #00ff88;
+    line-height: 1;
+}
+
+.ai-def-score-lbl {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.58em;
+    letter-spacing: 1.5px;
+    color: #778;
+}
+
+/* Telemetry & ML Evidence Matrix */
+.ai-evidence-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.ai-evidence-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 5px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ai-evidence-lbl {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6em;
+    letter-spacing: 1.5px;
+    color: #889;
+    text-transform: uppercase;
+}
+
+.ai-evidence-val {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 1.18em;
+    letter-spacing: 1px;
+    color: #fff;
+}
+
+.ai-evidence-desc {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.62em;
+    color: #778;
+    line-height: 1.4;
+    margin-top: 2px;
+}
+
+/* Rationale & Protocols */
+.ai-section-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 0.85em;
+    letter-spacing: 2px;
+    color: #00d2be;
+    text-transform: uppercase;
+    margin: 14px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ai-rationale-text {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.76em;
+    line-height: 1.7;
+    color: #c8d0e0;
+    background: rgba(0, 0, 0, 0.25);
+    border-left: 2px solid #00d2be;
+    padding: 10px 14px;
+    border-radius: 0 4px 4px 0;
+    margin-bottom: 14px;
+}
+
+.ai-directives-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ai-directive-item {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72em;
+    color: #ddd;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ai-directive-num {
+    font-weight: 700;
+    color: var(--gold);
+    font-size: 0.85em;
+    background: rgba(255, 215, 0, 0.1);
+    border: 1px solid rgba(255, 215, 0, 0.25);
+    border-radius: 3px;
+    padding: 1px 6px;
+}
+
+.ai-contingency-card {
+    background: rgba(255, 107, 107, 0.04);
+    border: 1px dashed rgba(255, 107, 107, 0.35);
+    border-radius: 5px;
+    padding: 10px 14px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72em;
+    line-height: 1.6;
+    color: #ffb3b3;
+}
+
+.ai-contingency-card b {
+    color: #ff6b6b;
+}
+
+@media(max-width: 900px) {
+    .ai-eng-window { padding: 14px 16px; }
+    .ai-radio-quote { font-size: 0.9em; }
+    .ai-def-mode { font-size: 1.3em; }
 }
