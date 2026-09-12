@@ -1,0 +1,507 @@
+================================================================================
+TRACKSHIFT — "HAMMER TIME" F1 STRATEGY & ENERGY ENGINE
+COMPLETE MATHEMATICAL FORMULAS & EQUATIONS REFERENCE
+================================================================================
+
+This document contains every mathematical model, physics equation, machine 
+learning formulation, statistical estimator, calibration metric, and 
+optimization algorithm implemented across the Trackshift codebase.
+
+Table of Contents:
+  1. Synthetic Fuel Mass Estimation
+  2. Kinetic Energy Regeneration & Density-Aware Sampling Scaling
+  3. ERS Power Unit Regulations & State-of-Charge (SoC) Dynamics
+  4. Battery State-of-Charge (SoC) Uncertainty Envelope
+  5. Intra-Lap Continuous SoC Path & Damped Band Flow
+  6. Pirelli-Style Tyre Degradation, Usable Life & Performance Cliff
+  7. Measured Track Tyre Wear via OLS & Bayesian Shrinkage
+  8. Lap-Time Machine Learning Model & Feature Interactions
+  9. Energy-to-Pace Sensitivity & Sector-Level Scaling
+ 10. Dual-Car Head-to-Head Overtake Models (Closing & Probability)
+ 11. Isotonic Probability Calibration, Brier Score & ECE
+ 12. Dynamic Gap Walk, Cumulative Hazard Rate & Pass Detection
+ 13. Multi-Policy Tactical Decision Engine & Utility Scoring
+ 14. Multi-Stop Pit Stint Dynamic Programming Optimizer
+ 15. Strategy Benchmark & Race-Time Improvement Delta
+
+================================================================================
+1. SYNTHETIC FUEL MASS ESTIMATION
+================================================================================
+Source: scripts/fuel_estimation.py
+
+Formula:
+  m_fuel(L) = max(0.0, M_start - L * m_burn)   [kg]
+
+Parameters:
+  - M_start = 110.0 kg       (Nominal maximum starting fuel load at lights-out)
+  - m_burn  = 2.0 kg/lap     (Synthetic linear burn rate proxy)
+  - L       = lap number (integer >= 0; lap 0 is pre-race baseline)
+
+Properties:
+  - Synthetic, model-derived race-progress proxy (not raw telemetry sensor)
+  - Strictly non-negative; clamps at 0.0 kg
+
+
+================================================================================
+2. KINETIC ENERGY REGENERATION & DENSITY-AWARE SAMPLING SCALING
+================================================================================
+Source: scripts/energy_simulator.py
+
+2.1. Braking Kinetic Energy Recovery Integral:
+  For consecutive telemetry speed samples (v_i, v_{i+1}) with v_{i+1} < v_i:
+    delta_E_k,i = 0.5 * m * (v_i^2 - v_{i+1}^2) * eta_regen   [Joules]
+
+  Where:
+    - v_i, v_{i+1} in m/s (converted from km/h by dividing by 3.6)
+    - eta_regen = 0.80 (80% electrical regeneration efficiency)
+    - Car mass:
+        m = 768.0 kg  (2026 "New Generation" PU spec)
+        m = 795.0 kg  (2014-2025 Hybrid PU legacy spec)
+
+2.2. Sampling-Density Compensation Factor S(n, dt):
+  Full-resolution telemetry (dt <= 0.5 s, >= 2 Hz) directly integrates braking 
+  without scaling (factor = 1.0). Sparse legacy laps (~6 samples) get the x2.2 
+  fudge factor to compensate for under-sampling:
+
+  If timestamps exist and median(dt) <= 0.5 s:
+    S(n, dt) = 1.0
+  Else by sample row count n:
+    If n >= 80:
+      S(n) = 1.0
+    If n <= 12:
+      S(n) = 2.2
+    If 12 < n < 80:
+      S(n) = 2.2 - ((n - 12) / (80 - 12)) * (2.2 - 1.0)
+
+2.3. Per-Lap Harvested Energy:
+  H_raw = min( (sum(delta_E_k,i) / 10^6) * S(n, dt),  H_limit )   [MJ]
+  Fallback if no speed drop detected: min(5.0 MJ, H_limit)
+
+
+================================================================================
+3. ERS POWER UNIT REGULATIONS & STATE-OF-CHARGE (SoC) DYNAMICS
+================================================================================
+Source: scripts/energy_simulator.py
+
+3.1. Power Unit Era Specifications:
+  ----------------------------------------------------------------------
+  Parameter                 2026 New Generation     2014-2025 Legacy
+  ----------------------------------------------------------------------
+  MGU-K Power               350 kW (0.35 MJ/s)      120 kW (0.12 MJ/s)
+  ES Usable Capacity        4.0 MJ                  4.0 MJ
+  Per-lap Harvest Limit     8.5 MJ/lap              2.0 MJ/lap
+  Per-lap Deploy Ceiling    8.5 MJ/lap              4.0 MJ/lap
+  Minimum Car Mass          768 kg                  795 kg
+  Flow Cap                  4.0 MJ/lap              4.0 MJ/lap
+  ----------------------------------------------------------------------
+
+3.2. Driving Mode Recovery Scaling:
+  H_mode = min( max(0.0, H_raw) * regen_style,  min(H_limit, 4.0) )
+  - Push:       regen_style = 0.85  (late braking, less energy recovered)
+  - Balanced:   regen_style = 1.00  (standard brake recovery)
+  - Lift&Coast: regen_style = 1.20  (early lift-off opens wider harvest window)
+
+3.3. Expected Pace Deviation & Net SoC Steering:
+  Expected pace T_baseline is the rolling median over the five laps on
+  either side of the current lap.
+  Pace deviation:
+    delta_pace = (T_baseline - T_lap) / T_baseline   (positive = faster lap)
+
+  Target Net Energy Move:
+    delta_E_net = -45.0 * delta_pace + 0.15 * (E_target - E_batt)
+    Where:
+      E_target = 4.0 * 0.55 = 2.20 MJ  (Balanced)
+      E_target = 4.0 * 0.90 = 3.60 MJ  (Lift & Coast)
+
+  Opening Burn-down Adjustment (when E_batt > E_band_high):
+    delta_E_net = delta_E_net - 0.35 * (E_batt - E_band_high)
+    (A battery sitting at 100% capacity burns surplus down to ~80% working band)
+
+  Clamp on single-lap net move:
+    delta_E_net = max(-1.0, min(1.0, delta_E_net))   [MJ]
+    E_target_end = max(E_reserve, min(E_cap, E_batt + delta_E_net))
+
+3.4. Deployment Demand & Energy-Limited Floor Throttle:
+  - Push mode:
+      D_req = D_ceiling
+  - Hold modes:
+      D_req = max(0.0, min(D_ceiling, E_batt + H_mode - E_target_end))
+
+  Available Deployable Energy above 10% Reserve (E_reserve = 0.40 MJ):
+    E_avail = max(0.0, E_batt - E_reserve) + H_mode
+
+  Energy-Limited Status:
+    If D_req > E_avail:
+      Lap is marked limited = True
+      D_actual = E_avail * 0.85   (FLOOR_REDEPLOY_FRACTION)
+    Else:
+      D_actual = D_req
+
+3.5. Headroom and End-of-Lap SoC:
+  Headroom = E_cap - (E_batt - D_actual)
+  H_actual = min(H_mode, Headroom)
+  E_end    = min(E_cap, E_batt - D_actual + H_actual)
+
+
+================================================================================
+4. BATTERY STATE-OF-CHARGE (SoC) UNCERTAINTY ENVELOPE
+================================================================================
+Source: scripts/energy_simulator.py (battery_uncertainty_band)
+
+Formulas:
+  Band_pct(delta_L) = min( 8.0,  2.0 + 0.5 * max(0.0, delta_L) )   [%]
+  Band_mj(delta_L)  = (Band_pct(delta_L) / 100.0) * E_cap           [MJ]
+
+Parameters:
+  - Floor uncertainty  = +/- 2.0%  (at trusted anchor lap)
+  - Drift rate         = +0.5% / lap (error compounding per projected lap)
+  - Ceiling cap        = +/- 8.0%  (maximum honest uncertainty beyond ~12 laps)
+  - E_cap              = 4.0 MJ
+
+Worst-case and Best-case bounds:
+  SoC_worst = max(0.0,   SoC_point - Band_pct)
+  SoC_best  = min(100.0, SoC_point + Band_pct)
+
+
+================================================================================
+5. INTRA-LAP CONTINUOUS SOC PATH & DAMPED BAND FLOW
+================================================================================
+Source: scripts/energy_simulator.py (intra_lap_battery_curve)
+
+5.1. Segment Weighting:
+  For n telemetry samples (n - 1 segments, j = 0 ... n - 2):
+  Speed in m/s: v_j = speed_kmh / 3.6
+  If v_{j+1} < v_j - 0.3 m/s (Braking):
+    w_harvest,j = max(0.0, v_j^2 - v_{j+1}^2)
+    w_deploy,j  = 0.0
+  Else (Accelerating / Cruising):
+    w_deploy,j  = max(0.0, throttle_{j+1})
+    w_harvest,j = 0.0
+
+5.2. Segment Flow Cap (120 kW = 0.12 MJ/s power limit):
+  delta_E_seg_max = 0.12 * (T_lap / (n - 1))   [MJ]
+
+5.3. Soft Working Window Leaking ([W_lo, W_hi] = [30%, 80%] = [1.2 MJ, 3.2 MJ]):
+  Rise(E, add):
+    room = max(0.0, W_hi - E)
+    If add <= room: return E + add
+    Else:           return W_hi + 0.30 * (add - room)
+
+  Fall(E, sub):
+    room = max(0.0, E - W_lo)
+    If sub <= room: return E - sub
+    Else:           return W_lo - 0.30 * (sub - room)
+
+5.4. Wiggle Compression:
+  Anchor line at fraction f_j = (j + 1) / (n - 1):
+    E_anchor(f_j) = E_start + (E_end - E_start) * f_j
+  Compressed SoC:
+    E_final(f_j)  = E_anchor(f_j) + 0.45 * (E_stepped(f_j) - E_anchor(f_j))
+    E_final clamped to [E_reserve, E_cap] = [0.4 MJ, 4.0 MJ]
+
+
+================================================================================
+6. PIRELLI-STYLE TYRE DEGRADATION, USABLE LIFE & PERFORMANCE CLIFF
+================================================================================
+Source: scripts/tyre_degradation.py
+
+6.1. Effective Degradation Rate:
+  Rate(c, track) = min( R_base(c) * M_track,  R_max(c) )   [% / lap]
+
+  Base Rates R_base:
+    - Soft:         4.50 %/lap
+    - Medium:       2.25 %/lap
+    - Hard:         1.35 %/lap
+    - Intermediate: 2.00 %/lap
+    - Wet:          1.80 %/lap
+
+  Maximum Rate Cap R_max:
+    - Soft:   5.0 %/lap
+    - Medium: 2.8 %/lap
+    - Hard:   1.6 %/lap
+
+6.2. Usable Tyre Life & Deterministic Monotonic Health:
+  Usable Life:
+    Life(c, track) = 100.0 / Rate(c, track)   [laps to 0% health]
+
+  Tyre Health at age a:
+    Health_raw(a) = 100.0 - Rate(c, track) * a
+    Health(a)     = max(10.0, Health_raw(a))   [%]
+    (Engineering floor = 10.0%: tyres never display at 0%)
+
+6.3. Pirelli Performance Cliff Penalty:
+  Below Cliff_Health = 40.0% health, lap times drop steeply up to 2.5 s/lap:
+    If Health_raw(a) >= 40.0:
+      Penalty_cliff(a) = 0.0 s/lap
+    If Health_raw(a) < 40.0:
+      frac = (40.0 - Health_raw(a)) / 40.0
+      Penalty_cliff(a) = 2.5 * min(1.0, frac)   [s/lap]
+
+
+================================================================================
+7. MEASURED TRACK TYRE WEAR VIA OLS & BAYESIAN SHRINKAGE
+================================================================================
+Source: scripts/measure_tyre_wear.py
+
+7.1. Within-Stint OLS Slope:
+  For clean laps i = 1 ... n with age a_i and lap time t_i:
+    mean_a = (1/n) * sum(a_i)
+    mean_t = (1/n) * sum(t_i)
+    slope_stint = sum((a_i - mean_a) * (t_i - mean_t)) / sum((a_i - mean_a)^2)
+
+7.2. Fuel-Corrected Wear Slope:
+  slope_wear = slope_stint - (-0.0703 s/lap)
+  (Removes the ML-fitted fleet fuel burn rate)
+
+7.3. Bayesian Shrinkage Multiplier:
+  Raw ratio relative to compound fleet median:
+    Ratio_raw = median(slope_wear) / slope_fleet(c)
+
+  Shrunk multiplier with prior strength K = 6.0 stints:
+    M_shrunk = (N_stints / (N_stints + 6.0)) * Ratio_raw + (6.0 / (N_stints + 6.0)) * 1.0
+    M_final  = max(0.5, min(2.0, M_shrunk))
+
+  Shipped Wear Rate:
+    Loss_shipped = round( min(R_base(c) * M_final,  R_max(c)),  2 )   [%/lap]
+
+
+================================================================================
+8. LAP-TIME MACHINE LEARNING MODEL & FEATURE INTERACTIONS
+================================================================================
+Source: scripts/ml_lap_predictions.py, scripts/feature_pipeline.py
+
+8.1. Discrete Phase and Era Categorization:
+  Race Phase:
+    phase(L) = 0  if L < 13           (Early race / heavy fuel)
+    phase(L) = 1  if 13 <= L < 26     (Mid-1)
+    phase(L) = 2  if 26 <= L < 42     (Mid-2)
+    phase(L) = 3  if L >= 42          (Late race / light fuel)
+
+  Season Era:
+    era(Year) = "18_20"  if Year < 2021
+    era(Year) = "21"     if Year == 2021
+    era(Year) = "22_23"  if 2022 <= Year <= 2023
+    era(Year) = "24_26"  if Year >= 2024
+
+8.2. Linear Regression Specification:
+  T_pred = beta_0 + beta_age * a 
+         + sum_c beta_c * I_c 
+         + sum_t beta_t * I_t 
+         + sum_k beta_phase,k * I_phase,k 
+         + sum_e beta_era,e * I_era,e 
+         + sum_c beta_{age:c} * (a * I_c) 
+         + sum_t beta_{age:t} * (a * I_t)
+
+  Where:
+    - a is tyre_age
+    - I_c, I_t, I_phase,k, I_era,e are binary dummy variables
+
+8.3. Extracted Wear Slopes and Fuel Burn:
+  Effective wear slope for compound c:
+    s_wear(c) = beta_age + beta_{age:c}   [s/lap]
+
+  Extracted fuel burn rate:
+    r_fuel = min(0.0, beta_age)           [s/lap]
+
+8.4. Performance Metrics:
+  MAE  = (1/N) * sum_{i=1}^N |y_i - T_pred,i|
+  RMSE = sqrt( (1/N) * sum_{i=1}^N (y_i - T_pred,i)^2 )
+  R^2  = 1 - [ sum_{i=1}^N (y_i - T_pred,i)^2 / sum_{i=1}^N (y_i - mean(y))^2 ]
+
+
+================================================================================
+9. ENERGY-TO-PACE SENSITIVITY & SECTOR-LEVEL SCALING
+================================================================================
+Source: scripts/overtake_inference.py (track_seconds_per_mj, track_sector_seconds_per_mj)
+
+9.1. Track Sensitivity:
+  p_track = 0.35 * ( FT_track / 0.6703 )   [s/MJ]
+  Where:
+    - 0.35 s/MJ is the baseline pacing benefit
+    - FT_track is the circuit's full-throttle time share
+    - 0.6703 is the fleet-mean full-throttle share
+
+9.2. Sector Deploy Deltas to Lap-Time Gain:
+  For 3-sector deltas delta_E = [delta_E_S1, delta_E_S2, delta_E_S3]:
+    delta_T_ers = sum_{s=1}^3 ( delta_E_s * p_sector,s )   [s/lap]
+
+9.3. Energy-Limited Throttling Penalty:
+  On limited laps (store hitting floor):
+    delta_T_effective = delta_T_ers * 0.70   (LIMITED_LAP_PACE_EFFECTIVENESS)
+
+
+================================================================================
+10. DUAL-CAR HEAD-TO-HEAD OVERTAKE MODELS (CLOSING & PROBABILITY)
+================================================================================
+Source: scripts/ml_overtake_predictions.py
+
+10.1. Head-to-Head Feature Vector x:
+  x = [
+    gap_before_s,
+    pace_gap_s             = T_pred,leader - T_pred,chaser,
+    chaser_age_minus_leader= a_chaser - a_leader,
+    chaser_tyre_advantage  = TyreRank_leader - TyreRank_chaser,
+    fuel_diff_kg           = m_fuel,chaser - m_fuel,leader,
+    energy_diff_mj         = clip(E_chaser - E_leader, -1.0, 1.0),
+    phase_dummies,
+    era_dummies,
+    track_dummies
+  ]
+
+  Tyre Ranking: Hypersoft (0) > Ultrasoft (1) > Supersoft (2) > Soft (3) >
+                Medium (4) > Hard (5) > Superhard (6) > Inter (7) > Wet (8)
+
+10.2. Closing Rate Regressor:
+  Closing_Rate_s = w_close^T * x + b_close   [seconds gained by chaser]
+
+10.3. Overtake Classifier (Logistic Regression with Balanced Class Weights):
+  z = w_overtake^T * x + b_overtake
+  P_raw(overtake) = 1 / (1 + e^(-z))
+
+
+================================================================================
+11. ISOTONIC PROBABILITY CALIBRATION, BRIER SCORE & ECE
+================================================================================
+Source: scripts/ml_overtake_predictions.py (fit_isotonic_calibrator)
+
+11.1. Monotonic Isotonic Mapping:
+  Fitted out-of-time on held-out test split (years >= 2024):
+    P_cal = m*(P_raw) = argmin_{m in M} sum_{i=1}^N ( y_i - m(P_raw,i) )^2
+    subject to m(u) <= m(v) for all u <= v.
+
+11.2. Brier Score Loss:
+  Brier = (1/N) * sum_{i=1}^N ( P_i - y_i )^2
+
+11.3. Expected Calibration Error (ECE):
+  With M = 10 fixed-width probability bins B_1 ... B_M:
+    ECE = sum_{m=1}^M ( |B_m| / N ) * | mean_pred(B_m) - fraction_pos(B_m) |
+    Where:
+      mean_pred(B_m)    = (1 / |B_m|) * sum_{i in B_m} P_i
+      fraction_pos(B_m) = (1 / |B_m|) * sum_{i in B_m} y_i
+
+
+================================================================================
+12. DYNAMIC GAP WALK, CUMULATIVE HAZARD RATE & PASS DETECTION
+================================================================================
+Source: scripts/overtake_inference.py (simulate_live_call)
+
+12.1. Dynamic Lap Stepping:
+  For lap L = start_lap ... race_length:
+    PaceGap_L = (T_leader(L) - T_chaser(L)) + delta_T_ers,chaser - delta_T_ers,leader
+    gap_{L+1} = max(0.05, gap_L - PaceGap_L)
+
+12.2. Cumulative Hazard Rate:
+  If gap_L <= 1.2 s (LIVE_WINDOW_S):
+    P_cum(L) = 1.0 - (1.0 - P_cum(L-1)) * (1.0 - P_raw(L))
+
+12.3. Pass Lap Determination:
+  L_pass = min { L | P_cum(L) >= 0.80 }   (LIVE_PASS_CUM)
+
+12.4. Coupled Leader Defense:
+  - Preset 'defensive_boost': leader counter-deploys LIVE_DEFENSE_NET_MJ = 0.24 MJ/lap
+    (matches attack push until leader store hits 30% floor)
+
+
+================================================================================
+13. MULTI-POLICY TACTICAL DECISION ENGINE & UTILITY SCORING
+================================================================================
+Source: scripts/policy_engine.py
+
+13.1. Tactical Policies Evaluated:
+  1. GREEDY ATTACK:   Phase 1 = +0.12 MJ/lap,  Phase 2 = +0.12 MJ/lap, deploy offset = 0
+  2. BALANCED HOLD:   Phase 1 =  0.00 MJ/lap,  Phase 2 =  0.00 MJ/lap, deploy offset = 0
+  3. TACTICAL STALK:  Phase 1 = -0.09 MJ/lap,  Phase 2 = +0.12 MJ/lap, deploy offset = 2
+  4. SAVE & DEFEND:   Phase 1 = -0.12 MJ/lap,  Phase 2 = -0.12 MJ/lap, deploy offset = 0
+  5. UNDERCUT PREP:   Phase 1 = +0.06 MJ/lap,  Phase 2 =  0.00 MJ/lap, deploy offset = 0
+
+13.2. Scoring Utility Function (in race-time seconds; lower is better):
+  Score(pi) = C_batt + C_wear + C_cliff + C_risk + C_latency - G_pass
+
+  Terms:
+  a) Pass Reward:
+       G_pass = P_cum * 6.0 s   (PASS_VALUE_S; set to 0.0 s if infeasible)
+  b) Battery Opportunity Deficit Cost:
+       SoC_worst = max(0.0, SoC_end - Band_pct)
+       E_worst   = (SoC_worst / 100.0) * 4.0 MJ
+       Deficit   = max(0.0, 1.6 MJ - E_worst)   (RESERVE_TARGET_MJ = 1.6 MJ = 40%)
+       C_batt    = 2.0 * Deficit                (LAMBDA_BATT = 2.0 s/MJ)
+  c) Tyre Extra Wear Cost:
+       Wear_delta = Rate_compound * min(1.0, net_mj / 0.12) * laps
+       C_wear     = 0.08 * Wear_delta           (LAMBDA_WEAR = 0.08 s/%)
+  d) Performance Cliff Risk:
+       C_cliff    = 1.5 s   if (min_SoC <= 30% AND pass occurs AND pushing lever)
+                  = 0.0 s   otherwise
+  e) Failed Attack Risk:
+       C_risk     = 1.0 * (1.0 - P_cum) * 4.0 s (LAMBDA_RISK = 1.0, DIRTY_AIR = 4.0 s)
+  f) Deferral Latency Cost:
+       C_latency  = 0.10 * (L_pass - L_start)   (LAMBDA_LATENCY = 0.10 s/lap)
+
+13.3. Hard Feasibility Gate:
+  Infeasible = True if:
+    (min_SoC < Reserve_SoC) OR (L_pass occurs AND min_SoC <= 30% AND pushing lever)
+  (Infeasible policies cannot be recommended)
+
+13.4. Decision Confidence Metric:
+  Score Margin:
+    Margin = Score(pi_second_best) - Score(pi_best)
+
+  Uncertainty Band Degradation Multiplier:
+    mu_band = 1.0 - 0.4 * [ (Band_pct - 2.0) / (8.0 - 2.0) ]
+
+  Confidence:
+    Confidence = min( 1.0, max(0.0, (Margin / 1.5) * mu_band) )
+
+
+================================================================================
+14. MULTI-STOP PIT STINT DYNAMIC PROGRAMMING OPTIMIZER
+================================================================================
+Source: scripts/dashboard.py (_optimize_plans, _wear_cost)
+
+14.1. Neutralisation-Discounted Pit Stop Loss:
+  T_pit_now = T_event * f_traffic
+  Where:
+    - RedFlag:   T_event = 0.0 s   (free tyre swap)
+    - SafetyCar: T_event = 14.0 s  (bunched field)
+    - VSC:       T_event = 18.0 s  (delta time)
+    - GreenFlag: T_event = 22.0 s  (standard pit loss)
+    - Traffic Multiplier f_traffic:
+        Light = 1.0, Moderate = 1.15, Heavy = 1.35
+
+14.2. Stint Cumulative Wear Time:
+  WearCost(c, start_age, laps, track):
+    = sum_{i=0}^{laps-1} [ s_measured(c, track) * (start_age + i) 
+                           + Penalty_cliff(c, start_age + i, track) ]
+
+14.3. Bellman Recurrence for k Stops across r Remaining Laps:
+  Base Case (k = 0 stops):
+    DP[0][r] = min_{c in Fresh} [ r * Delta_Pace(c) + WearCost(c, 0, r, track) ]
+
+  Inductive Step (k >= 1 stops):
+    DP[k][r] = min_{c in Fresh, 1 <= m < r} [
+      m * Delta_Pace(c) + WearCost(c, 0, m, track) + T_pit_green + DP[k-1][r-m]
+    ]
+
+  Subject to Tyre Set Inventory Constraint:
+    sum_{stints} I(compound == c) <= FreshSets(c)
+
+14.4. Undercut & Overcut Criterion:
+  - Undercut Window: (0.0 s <= gap_ahead <= 2.5 s) AND (stops >= 1)
+  - Overcut Window:  (gap_ahead <= -3.0 s) AND (stops >= 1)
+
+
+================================================================================
+15. STRATEGY BENCHMARK & RACE-TIME IMPROVEMENT DELTA
+================================================================================
+Source: scripts/benchmark_energy_strategy.py
+
+15.1. Lap Time with Energy Credit:
+  T_sim(i) = T_base(i) - p_track * D_actual(i) * Effectiveness(i)
+  Where Effectiveness(i) = 0.70 if limited lap, else 1.00.
+
+15.2. Total Race Time:
+  T_total = sum_{i=1}^N T_sim(i)
+
+15.3. Closing-Phase Improvement Delta (default closing window = final 15 laps):
+  Delta_T_closing = sum_{i = N - 15}^N [ Credit_flat_out(i) - Credit_strategy(i) ]
+  (Reproduces Monaco 2023 headline: -1.875 s AI Strategy vs Flat-Out)
+================================================================================
