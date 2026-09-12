@@ -222,6 +222,60 @@ class EngineCache(unittest.TestCase):
                              pe.CALL_ENGINE_CACHE_MAX)
 
 
+class DefaultStateHonesty(unittest.TestCase):
+    """The default no-slider call must never be degenerate.
+
+    Before the slider integration the default card reported
+    battery_margin_pct = None (zero-net policies walked no store) and a
+    confidence of exactly 0.0 on the leader seat (a structural HOLD &
+    MANAGE / BANK & HOPE score tie).  At the default state — every
+    slider at rest — the card must carry a DEFINED battery margin and a
+    NON-DEGENERATE confidence, without changing the default call.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.chaser = _evaluate(perspective="chaser")
+        cls.leader = _evaluate(perspective="leader")
+
+    def test_battery_margin_is_defined_on_both_seats(self):
+        for out in (self.chaser, self.leader):
+            fc = out["final_call"]
+            self.assertIsNotNone(
+                fc["battery_margin_pct"],
+                "the default card reports no battery margin")
+            self.assertIsNotNone(fc["battery_margin_worst_pct"])
+
+    def test_confidence_is_non_degenerate_on_both_seats(self):
+        for out in (self.chaser, self.leader):
+            fc = out["final_call"]
+            c = fc["confidence"]
+            self.assertGreater(c, 0.0,
+                               "a structural tie must not pin confidence at 0")
+            self.assertLessEqual(c, 1.0)
+            self.assertGreater(
+                fc["engine_margin_s"], 0.0,
+                "the surfaced call must beat a distinct alternative")
+
+    def test_hold_rows_report_a_defined_margin(self):
+        # The hold policies walk the store-neutral posture: SOC modelled,
+        # margin defined — but the posture still spends and banks nothing.
+        for out in (self.chaser, self.leader):
+            for p in out["policies"]:
+                if p["policy"] in ("BALANCED HOLD", "HOLD & MANAGE"):
+                    self.assertIsNotNone(p["soc_end_pct"])
+                    self.assertIsNotNone(p["battery_margin_pct"])
+                    self.assertEqual(p["energy_cost_mj"], 0.0)
+                    self.assertEqual(p["energy_banked_mj"], 0.0)
+
+    def test_default_winners_are_unchanged(self):
+        # The honesty fix must not flip the default recommendation.
+        self.assertEqual(self.chaser["final_call"]["action"],
+                         "BALANCED HOLD")
+        self.assertEqual(self.leader["final_call"]["action"],
+                         "HOLD & MANAGE")
+
+
 class BatteryMapping(unittest.TestCase):
     """The seat's own battery override reaches the right engine."""
 

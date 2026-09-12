@@ -39,12 +39,23 @@ function ucSetPerspective(btn) {
     if (lbl) lbl.textContent = leader
         ? 'Our battery now — the defender (MJ of the 4.0 MJ store)'
         : 'Our battery now — the chaser (MJ of the 4.0 MJ store)';
+    const shapeLbl = document.getElementById('uc-shape-label');
+    if (shapeLbl) shapeLbl.textContent = leader
+        ? 'Our ERS sector shape — the leader\'s defence (MJ/lap deploy delta per sector)'
+        : 'Our ERS sector shape — the chaser\'s attack (MJ/lap deploy delta per sector)';
     const line = document.getElementById('ht-hero-line');
     if (line) line.textContent = leader
         ? 'The car behind is attacking — the defence engine answers from this seat.'
         : 'The attack engine answers from this seat — scored against the defence the opponent\'s engine actually recommends.';
     // (The scenario narrative reclaims this line whenever a race-state input
     // changes — see htUpdateContext in whatif.js.)
+    // The slider bank follows the seat: reset it on the flip so a drag
+    // made for one car can never silently ride the other car's call.
+    [1, 2, 3].forEach(k => {
+        const el = document.getElementById('uc-' + UC_SHAPE_PREFIX + 'd' + k);
+        if (el) el.value = '0';
+    });
+    ucSectorInput();
     // A rendered card from the other seat is stale the moment the seat flips:
     // schedule the auto-refresh instead of demanding a manual re-run.
     const out = document.getElementById('uc-out');
@@ -59,6 +70,44 @@ function ucMjToPct(raw) {
     const mj = parseFloat(raw);
     if (!Number.isFinite(mj)) return null;
     return Math.max(0, Math.min(100, 100 * mj / 4.0));
+}
+
+// ── ERS sector slider bank (Energy Sandbox vocabulary) ──────────────────
+
+// ONE slider bank, bound to the selected seat: the chaser's attack when we
+// sit chaser, the leader's defence when we sit leader.  There is no second
+// bank — you always steer the car whose seat is selected.
+
+// The active bank's field prefix ('s' — ids uc-sd1..3).
+const UC_SHAPE_PREFIX = 's';
+
+// Read the slider bank (ids uc-sd1..3) as [s1, s2, s3] MJ/lap, or null
+// when the whole bank sits at zero (backend collapses that to no shape).
+function ucShapeVec() {
+    const v = [1, 2, 3].map(k => parseFloat(htVal('uc-' + UC_SHAPE_PREFIX + 'd' + k)) || 0);
+    return v.some(x => Math.abs(x) > 1e-9) ? v : null;
+}
+
+// Live value/sum readout for the bank — the sandbox's sbSliderInput,
+// mirrored so a slider drag shows its energy meaning before any run.
+function ucSectorInput() {
+    const tail = ucSeat() === 'leader'
+        ? 'every defence expresses its lever through this shape (zero-sum reallocates pace, net deploy draws the store)'
+        : "every attack policy expresses its lever through this shape (zero-sum reallocates pace, net deploy draws the store)";
+    const d = [1, 2, 3].map(k => parseFloat(htVal('uc-' + UC_SHAPE_PREFIX + 'd' + k)) || 0);
+    d.forEach((v, k) => {
+        const el = document.getElementById('uc-' + UC_SHAPE_PREFIX + 'v' + (k + 1));
+        if (el) el.textContent = (v >= 0 ? '+' : '') + v.toFixed(2);
+    });
+    const sum = d[0] + d[1] + d[2];
+    const sumEl = document.getElementById('uc-' + UC_SHAPE_PREFIX + '-sum');
+    if (sumEl) {
+        sumEl.textContent = 'Σ Δ = ' + (sum >= 0 ? '+' : '') + sum.toFixed(2) +
+            ' MJ/lap · ' + (Math.abs(sum) < 0.005
+                ? 'pure reallocation — store-neutral, pace shape only'
+                : (sum > 0 ? "net deploy from the car's 4.0 MJ store (30% floor)" : 'net bank to the car\'s 4.0 MJ store (full = stop lifting)')) +
+            ' · ' + tail;
+    }
 }
 
 // ── Payload assembly (the panel's own inputs are the single source) ──────
@@ -88,6 +137,16 @@ function ucState() {
     // OUR battery: the seat's own car (MJ of the 4.0 MJ store).
     const batt = ucMjToPct(htVal('ov-ers-batt'));
     if (batt != null) body.battery_pct = batt;
+    // Per-sector ERS slider bank (the Energy Sandbox's exact vocabulary:
+    // MJ/lap deploy delta per sector) — ONE bank, bound to the selected
+    // seat: from the chaser seat it expresses every attack policy's lever;
+    // from the leader seat it expresses every defence's lever.  An
+    // all-zero bank sends no field — it collapses to the no-shape walk.
+    const shape = ucShapeVec();
+    if (shape) {
+        if (body.perspective === 'leader') body.leader_ers_shape = shape;
+        else body.chaser_ers_shape = shape;
+    }
     // Reserve target (% of store -> MJ): policies below it are rejected.
     const reservePct = parseFloat(htVal('uc-reserve'));
     if (Number.isFinite(reservePct) && reservePct > 0) {
@@ -370,6 +429,13 @@ const UC_AUTO_IDS = new Set([
     'ov-ltyre', 'ov-ctyre', 'ov-lage', 'ov-cage',
     'ov-ers-batt', 'uc-reserve', 'uc-threat-batt',
 ]);
+
+// The slider bank carries its own oninput (ucSectorInput for the live Σ);
+// the range 'input' events still reach the delegated listener below, so
+// map them onto the auto-refresh set by id prefix.
+document.addEventListener('input', e => {
+    if (e.target instanceof Element && /^uc-sd[123]$/.test(e.target.id)) ucScheduleAuto();
+});
 
 document.addEventListener('input', e => {
     if (e.target instanceof Element && UC_AUTO_IDS.has(e.target.id)) ucScheduleAuto();

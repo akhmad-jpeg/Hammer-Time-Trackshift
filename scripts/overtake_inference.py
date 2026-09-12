@@ -2134,10 +2134,14 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     if not (0 < cum_target < 1):
         raise ValueError("pass_cum must be in (0, 1)")
 
-    # Chaser-only ERS lever (leader stays Balanced).  None / all-zeros =
-    # neutral.  The lever is a per-sector deploy-delta vector (S1/S2/S3 MJ)
-    # exactly like the Energy Sandbox; the flat posture int (-100..100) is a
-    # shortcut that applies the same delta to all three sectors.
+    # Chaser-only ERS lever (leader stays Balanced).  None = no lever;
+    # the lever is a per-sector deploy-delta vector (S1/S2/S3 MJ) exactly
+    # like the Energy Sandbox; the flat posture int (-100..100) is a
+    # shortcut that applies the same delta to all three sectors.  An
+    # EXPLICIT all-zero vector is the store-neutral posture, not the
+    # no-lever walk: the store is modelled and reported (margin defined)
+    # while the pace stays Balanced.
+    chaser_store_neutral = False
     ers_deltas = None
     if chaser_ers_deltas is not None:
         try:
@@ -2149,7 +2153,11 @@ def simulate_live_call(leader_code, chaser_code, track_name,
             raise ValueError(
                 "chaser_ers_deltas must be 3 numbers (MJ per sector)")
         ers_deltas = [max(-8.5, min(8.5, x)) for x in d]
+        if all(abs(x) < 1e-9 for x in ers_deltas):
+            # Explicit zeros: store-neutral posture — keep the walk ON.
+            chaser_store_neutral = True
     elif chaser_ers not in (None, "", 0, "0"):
+        spread = None
         try:
             e = max(-100.0, min(100.0, float(chaser_ers)))
         except (TypeError, ValueError):
@@ -2157,7 +2165,8 @@ def simulate_live_call(leader_code, chaser_code, track_name,
         if abs(e) >= 0.5:
             spread = (e / 100.0) * ERS_MAX_MJ_LAP
             ers_deltas = [spread, spread, spread]
-    if ers_deltas is not None and all(abs(x) < 1e-9 for x in ers_deltas):
+    if (ers_deltas is not None and not chaser_store_neutral
+            and all(abs(x) < 1e-9 for x in ers_deltas)):
         ers_deltas = None
     net_mj = sum(ers_deltas) if ers_deltas is not None else 0.0
     # Seconds-per-MJ is a property of the circuit, so it is always reported
@@ -2184,6 +2193,9 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     energy_limited_laps = 0
 
     # ---- LEADER lever (mirror of the chaser's block, same physics).
+    # An explicit all-zero vector is the store-neutral posture (walk ON,
+    # pace Balanced), exactly like the chaser's block above.
+    leader_store_neutral = False
     l_ers_deltas = None
     if leader_ers_deltas is not None:
         try:
@@ -2195,15 +2207,19 @@ def simulate_live_call(leader_code, chaser_code, track_name,
             raise ValueError(
                 "leader_ers_deltas must be 3 numbers (MJ per sector)")
         l_ers_deltas = [max(-8.5, min(8.5, x)) for x in d]
+        if all(abs(x) < 1e-9 for x in l_ers_deltas):
+            leader_store_neutral = True
     elif leader_ers not in (None, "", 0, "0"):
+        l_spread = None
         try:
             e = max(-100.0, min(100.0, float(leader_ers)))
         except (TypeError, ValueError):
             raise ValueError("leader_ers must be a number between -100 and 100")
         if abs(e) >= 0.5:
-            spread = (e / 100.0) * ERS_MAX_MJ_LAP
-            l_ers_deltas = [spread, spread, spread]
-    if l_ers_deltas is not None and all(abs(x) < 1e-9 for x in l_ers_deltas):
+            l_spread = (e / 100.0) * ERS_MAX_MJ_LAP
+            l_ers_deltas = [l_spread, l_spread, l_spread]
+    if (l_ers_deltas is not None and not leader_store_neutral
+            and all(abs(x) < 1e-9 for x in l_ers_deltas)):
         l_ers_deltas = None
     # Explicit leader lever wins; leader_posture is the no-lever preset.
     leader_defending = leader_posture == "defensive_boost"
@@ -2217,7 +2233,12 @@ def simulate_live_call(leader_code, chaser_code, track_name,
     else:
         leader_net_mj = 0.0
         leader_shape_s = 0.0
-    leader_on = l_ers_deltas is not None or leader_defending
+    if leader_store_neutral:
+        # Reactive preset pace must not leak into a store-neutral posture.
+        leader_net_mj = 0.0
+        leader_shape_s = 0.0
+    leader_on = (l_ers_deltas is not None or leader_defending
+                 or leader_store_neutral)
     if leader_on:
         try:
             l_start_pct = float(leader_battery_pct or ERS_DEFAULT_START_PCT)

@@ -2057,6 +2057,26 @@ def strategy_call():
 
         year_raw = body.get('year')
         year = int(year_raw) if year_raw not in (None, "") else None
+
+        def _shape(key):
+            """Per-sector ERS slider bank (Energy Sandbox vocabulary).
+
+            Expects [s1, s2, s3] MJ/lap deploy deltas; rejected unless it
+            is exactly 3 finite numbers.  Clamping and the all-zero ->
+            no-shape collapse are policy_engine's job (same rules the
+            simulator applies), so the route stays a thin parser.
+            """
+            raw = body.get(key)
+            if raw in (None, ""):
+                return None
+            try:
+                vals = [float(x) for x in list(raw)]
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} must be 3 numbers (MJ per sector)")
+            if len(vals) != 3:
+                raise ValueError(f"{key} must be 3 numbers (MJ per sector)")
+            return vals
+
         result = policy_engine.evaluate_call(
             leader_code=leader, chaser_code=chaser, track_name=track,
             start_lap=int(body.get('start_lap') or 1),
@@ -2071,6 +2091,8 @@ def strategy_call():
             threat_battery_pct=_num('threat_battery_pct'),
             reserve_target_mj=_num('reserve_target_mj'),
             perspective=seat,
+            chaser_shape=_shape('chaser_ers_shape'),
+            leader_shape=_shape('leader_ers_shape'),
         )
         resp = jsonify(result)
         resp.headers['Cache-Control'] = 'no-store'

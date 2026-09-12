@@ -168,11 +168,18 @@ def _engine_cache_key(engine: str, *, posture=None, **kw) -> tuple:
     Battery slots are normalised exactly as the engines normalise them
     (None -> ERS_DEFAULT_START_PCT), so a seat flip at default batteries
     is a cache hit rather than a recomputation of an identical state.
+    The slider banks are normalised via _shape_vector (the same
+    normalisation the engines apply), so two raw vectors that collapse
+    to the same walked shape share an entry — while genuinely different
+    shapes (a different spread, or none) never collide.
     """
 
     def _batt(v):
         return ERS_DEFAULT_START_PCT if v is None else float(v)
 
+    shape = _shape_vector(kw.get("chaser_shape"))
+    l_shape = _shape_vector(kw.get("leader_shape"))
+    t_shape = _shape_vector(kw.get("threat_shape"))
     return (
         engine,
         str(kw["leader_code"]).upper(), str(kw["chaser_code"]).upper(),
@@ -186,6 +193,9 @@ def _engine_cache_key(engine: str, *, posture=None, **kw) -> tuple:
         _batt(kw["chaser_batt"]),
         float(kw["reserve"]),
         posture if engine == "chaser" else None,
+        (tuple(shape) if shape is not None else None),
+        (tuple(l_shape) if l_shape is not None else None),
+        (tuple(t_shape) if t_shape is not None else None),
     )
 
 
@@ -215,6 +225,87 @@ def _lever(net_mj: float) -> list[float]:
     """
     spread = max(-8.5, min(8.5, net_mj / 3.0))
     return [spread, spread, spread]
+
+
+def _shape_vector(shape) -> list[float] | None:
+    """Normalise a caller-supplied per-sector shape to [3 floats] or None.
+
+    The Energy Sandbox's slider vocabulary: three MJ/lap deploy deltas,
+    one per sector, clamped per-sector to +-8.5 MJ (same clamp
+    simulate_live_call applies).  A vector entirely below the 0.01 MJ
+    noise floor (the sliders step at 0.05) collapses to None — an inert
+    shape IS the historical no-lever walk — but a zero-SUM reallocation
+    (+a, -a, 0) stays active: it is fully delivered and store-neutral,
+    exactly the sandbox's semantics.
+    """
+    if shape is None:
+        return None
+    try:
+        v = [float(x) for x in list(shape)]
+    except (TypeError, ValueError):
+        return None
+    if len(v) != 3:
+        return None
+    v = [max(-8.5, min(8.5, x)) for x in v]
+    if max(abs(x) for x in v) < 0.01:
+        return None
+    return v
+
+
+def _shape_net(vec: list[float] | None) -> float:
+    """Net MJ/lap of a normalised shape (0.0 for the no-shape walk)."""
+    return sum(vec) if vec is not None else 0.0
+
+
+def _scale_shape(vec: list[float] | None, factor: float) -> list[float] | None:
+    """Scale a shape's magnitude for a policy phase, preserving its SPREAD.
+
+    A policy's phase lever is net MJ/lap; a caller shape spreads its net
+    over the sectors.  The scaled shape keeps the caller's sector
+    proportions (the s/MJ per sector still prices each delta) while its
+    net matches the phase's ask; net-0 reallocations pass through
+    unscaled (they are pure pace shapes).  A zero net on a zero-sum
+    shape, or a scaled-to-zero shape, collapses to None.
+    """
+    if vec is None:
+        return None
+    net = _shape_net(vec)
+    if abs(net) < 1e-9:
+        return vec            # reallocation shape: active at every phase
+    scaled = [x * factor for x in vec]
+    if all(abs(x) < 1e-9 for x in scaled):
+        return None
+    return scaled
+
+
+def _phase_vector(shape, net_mj: float) -> list[float] | None:
+    """One phase's walked per-sector vector from a shape + a net ask.
+
+    A shape with real net expresses the policy's ask THROUGH it (scaled,
+    spread preserved).  A zero-SUM reallocation cannot carry the ask, so
+    the ask rides the flat lever ON TOP of the reallocation — the shape's
+    reallocation pace and the policy's magnitude are independent inputs.
+    No shape at all degrades to the historical flat lever — and a zero ask
+    with no shape is the EXPLICIT store-neutral posture ([0, 0, 0]): the
+    simulator walks the store and reports its SOC (the battery margin is
+    defined) while keeping Balanced pace.  A caller shape passes through
+    unchanged at every phase.
+    """
+    vec = _shape_vector(shape)
+    if vec is None:
+        if abs(net_mj) < 1e-9:
+            return [0.0, 0.0, 0.0]
+        return _lever(net_mj)
+    net0 = _shape_net(vec)
+    if abs(net0) > 1e-9:
+        return _scale_shape(vec, net_mj / net0)
+    flat = _lever(net_mj) if net_mj else None
+    if flat is None:
+        return vec
+    merged = [max(-8.5, min(8.5, v + f)) for v, f in zip(vec, flat)]
+    if all(abs(x) < 1e-9 for x in merged):
+        return None
+    return merged
 
 
 # (name, phase-1 net MJ/lap, phase-2 net MJ/lap, deploy-lap offset).
@@ -268,8 +359,15 @@ POLICIES: list[dict[str, Any]] = [
 
 def _run_phase(leader_code, chaser_code, track_name, start_lap, race_length,
                gap_before_s, tyres, year, battery_pct, net_mj,
-               leader_posture="balanced"):
-    """One simulate_live_call pass at a given net lever; returns (sim, ms)."""
+               leader_posture="balanced", chaser_shape=None):
+    """One simulate_live_call pass at a given net lever; returns (sim, ms).
+
+    ``chaser_shape`` is the caller's per-sector deploy-delta vector (the
+    Energy Sandbox slider bank).  With a shape supplied, the policy's net
+    ask is expressed THROUGH it — each phase's lever scales the shape,
+    preserving its sector spread — so the ranked policies and the manual
+    sliders share one vocabulary instead of two flat levers.
+    """
     t0 = time.perf_counter()
     sim = oi.simulate_live_call(
         leader_code=leader_code, chaser_code=chaser_code,
@@ -280,7 +378,7 @@ def _run_phase(leader_code, chaser_code, track_name, start_lap, race_length,
         leader_tyre_age=tyres["leader"]["age"],
         chaser_tyre_age=tyres["chaser"]["age"],
         year=year,
-        chaser_ers_deltas=_lever(net_mj) if net_mj else None,
+        chaser_ers_deltas=_phase_vector(chaser_shape, net_mj),
         chaser_battery_pct=battery_pct,
         leader_posture=leader_posture,
     )
@@ -333,6 +431,7 @@ def evaluate_tactical_policies(
         year: int | None = None, chaser_battery_pct: float | None = None,
         reserve_target_mj: float | None = None,
         leader_posture: str = "balanced",
+        chaser_shape=None,
 ) -> dict[str, Any]:
     """Evaluate all five policies against one race state.
 
@@ -340,6 +439,13 @@ def evaluate_tactical_policies(
     leader runs its own race; 'defensive_boost' has the leader counter-
     deploy (its own 4 MJ store, same floor) so every closing-based policy
     is scored against an opponent that actually reacts.
+
+    ``chaser_shape`` is the strategist's own per-sector deploy-delta bank
+    (Energy Sandbox sliders, MJ/lap per sector).  When supplied, every
+    policy expresses its lever THROUGH that shape (magnitude scaled per
+    phase, sector spread preserved) and the payload discloses it under
+    ``ers_shape``; the net-0 reallocation case stays active and
+    store-neutral, turning the SOC walk on for BALANCED HOLD too.
 
     Returns the full comparison payload: per-policy rows (score components,
     pass lap, energy cost, SOC trajectory stats, feasibility), the ranked
@@ -366,6 +472,7 @@ def evaluate_tactical_policies(
     base_call = base_sim["call"]
 
     rows = []
+    chaser_shape_vec = _shape_vector(chaser_shape)
     for pol in POLICIES:
         deploy_lap = start_lap + pol["deploy_offset"]
         net1, net2 = pol["phase1_mj"], pol["phase2_mj"]
@@ -374,7 +481,8 @@ def evaluate_tactical_policies(
         if pol["deploy_offset"] == 0:
             sim, ms = _run_phase(leader_code, chaser_code, track_name,
                                  start_lap, race_length, gap_before_s,
-                                 tyres, year, batt_pct, net1, leader_posture)
+                                 tyres, year, batt_pct, net1, leader_posture,
+                                 chaser_shape=chaser_shape)
             call, summ = sim["call"], sim["summary"]
             soc_end_pct = summ.get("chaser_soc_end_pct")
             min_soc_pct = min((l.get("chaser_soc_pct", 100.0)
@@ -390,7 +498,8 @@ def evaluate_tactical_policies(
             phase1_laps = deploy_lap  # walk phase 1 UP TO (and incl.) this lap
             sim1, ms1 = _run_phase(leader_code, chaser_code, track_name,
                                    start_lap, deploy_lap, gap_before_s,
-                                   tyres, year, batt_pct, net1, leader_posture)
+                                   tyres, year, batt_pct, net1, leader_posture,
+                                   chaser_shape=chaser_shape)
             gap2, c_age2, l_age2 = _phase2_gap(sim1, phase1_laps)
             # Battery carried into phase 2 = the phase-1 end SOC.
             soc1 = sim1.get("summary", {}).get("chaser_soc_end_pct")
@@ -408,7 +517,7 @@ def evaluate_tactical_policies(
             sim2, ms2 = _run_phase(leader_code, chaser_code, track_name,
                                    deploy_lap + 1, race_length, gap2,
                                    tyres2, year, batt_start_phase2_pct, net2,
-                                   leader_posture)
+                                   leader_posture, chaser_shape=chaser_shape)
             # Wear is priced per phase: the banking phase burns nothing
             # (net <= 0), the strike pays at full lever on the chaser's
             # compound — the old code priced phase-1's lever only, so
@@ -438,8 +547,25 @@ def evaluate_tactical_policies(
         cum = float(call.get("cumulative_probability") or 0.0)
         drained = (min_soc_pct is not None
                    and min_soc_pct <= LIVE_ATTACK_MIN_SOC_PCT + 0.05)
-        reserve_breach = (min_soc_pct is not None
+        # The reserve bar exists to reject policies that SPEND below the
+        # management target.  A zero-spend row (store-neutral hold) never
+        # dips — its store sits where the car's is, below target or not —
+        # so it must stay recommendable (with the honest negative margin).
+        no_spend = deployed <= 1e-9 and banked <= 1e-9
+        reserve_breach = (min_soc_pct is not None and not no_spend
                           and min_soc_pct < _battery_pct(reserve) - 0.05)
+
+        # ---- Store-neutral rows: a hold asks no lever, but its SOC walk
+        # is still ON ([0, 0, 0] posture) — the projected store is modelled
+        # and reported, so the card's battery margin is defined even for
+        # the no-slider default (an honest NEGATIVE margin when the car
+        # already sits below the target).  The store path is untouched
+        # (energy_cost/banked stay 0, min_soc keeps its no-walk value), so
+        # a no-spend posture is never priced as a reserve breach: the
+        # breach rule rejects policies that SPEND below the target — a car
+        # sitting under target must still get the hold advice.
+        if soc_end_pct is None:
+            soc_end_pct = round(min(100.0, batt_pct), 1)
 
         # ---- SOC uncertainty (the battery is a synthesized estimate).
         # The band grows with laps since the projection's anchor (race
@@ -525,13 +651,26 @@ def evaluate_tactical_policies(
                 ("pass converts only by draining the store to its floor"
                  if (pass_lap and drained and push_lever > 0) else None)),
             "phase_laps_ms": round(ms_total, 1),
+            # The strategist's slider bank, as actually walked (per-phase
+            # scaling included) — disclosure, so a rendered card can be
+            # reproduced from the payload alone.
+            "ers_shape": (chaser_shape_vec
+                          if chaser_shape_vec is not None else None),
         })
 
     feasible = [r for r in rows if r["feasible"]]
     ranked = sorted(feasible or rows, key=lambda r: r["score_s"])
     best, second = (ranked[0], ranked[1] if len(ranked) > 1 else None)
-    margin = ((second["score_s"] - best["score_s"])
-              if second is not None else CONFIDENCE_SPAN_S)
+    # Decision margin = the gap to the next DISTINCT score.  A duplicated
+    # score is a mirror of the same walk, not an alternative — two policies
+    # that price identically ARE the same plan, so the tie cannot make the
+    # call look like a coin flip (the runner-up slot still discloses it).
+    next_scores = [r["score_s"] for r in ranked[1:]
+                   if r["score_s"] > best["score_s"] + 1e-9]
+    margin = ((min(next_scores) - best["score_s"])
+              if next_scores else
+              ((second["score_s"] - best["score_s"])
+               if second is not None else CONFIDENCE_SPAN_S))
     # Confidence = decision margin, DEGRADED by the SOC uncertainty band:
     # a wide band means the battery itself is uncertain, so even a large
     # score margin is less trustworthy.  band spans [floor, cap] = [2, 8];
@@ -577,6 +716,8 @@ def evaluate_tactical_policies(
             "race_length": race_length, "gap_before_s": gap_before_s,
             "tyres": tyres, "year": year,
             "battery_pct": batt_pct,
+            "ers_shape": (list(chaser_shape_vec)
+                          if chaser_shape_vec is not None else None),
             "leader_posture": leader_posture,
             "battery_band_pct": band_state["band_pct"],
             "battery_range_pct": [round(max(0.0, batt_pct - band_state["band_pct"]), 1),
@@ -749,13 +890,25 @@ LEADER_POLICIES: list[dict[str, Any]] = [
 
 def _leader_walk(leader_code, chaser_code, track_name, start_lap, race_length,
                  gap_before_s, tyres, year, chaser_batt_pct, leader_batt_pct,
-                 lever, preset=None):
-    """One leader-side simulate_live_call pass; returns (sim, ms)."""
+                 lever, preset=None, leader_shape=None, threat_shape=None):
+    """One leader-side simulate_live_call pass; returns (sim, ms).
+
+    ``leader_shape`` is the strategist's own per-sector bank (Energy
+    Sandbox sliders): when supplied, each policy's lever is expressed
+    through it, magnitude scaled, spread preserved.  ``threat_shape`` is
+    the attacking car's per-sector bank — the attack the defence is
+    scored against runs the chaser's shape, not a flat lever.
+    """
     kwargs = {}
     if preset:
         kwargs["leader_posture"] = preset
-    elif lever:
-        kwargs["leader_ers_deltas"] = _lever(lever)
+    else:
+        vec = _phase_vector(leader_shape, lever)
+        if vec is not None:
+            kwargs["leader_ers_deltas"] = vec
+    threat_vec = _shape_vector(threat_shape)
+    if threat_vec is not None:
+        kwargs["chaser_ers_deltas"] = threat_vec
     t0 = time.perf_counter()
     sim = oi.simulate_live_call(
         leader_code=leader_code, chaser_code=chaser_code,
@@ -801,6 +954,7 @@ def evaluate_leader_policies(
         year: int | None = None, chaser_battery_pct: float | None = None,
         leader_battery_pct: float | None = None,
         reserve_target_mj: float | None = None,
+        leader_shape=None, threat_shape=None,
 ) -> dict[str, Any]:
     """Evaluate five DEFENCE policies for the leader against one threat.
 
@@ -809,6 +963,11 @@ def evaluate_leader_policies(
     the position SURVIVES, priced against the leader's own battery and
     tyre costs, with the same structural constraints as the chaser engine
     (reserve breach / floor-drain => INFEASIBLE, never recommended).
+
+    ``leader_shape`` expresses the leader's own slider bank through every
+    policy lever; ``threat_shape`` runs the attacking chaser on its slider
+    bank instead of the flat default lever.  Both may be net-0
+    reallocations (active, store-neutral).
 
     The ACTION card answers: how do I keep this position, what does the
     threat look like under that answer, and what does the defence cost?
@@ -829,6 +988,8 @@ def evaluate_leader_policies(
 
     rows = []
     base_summ = None
+    leader_shape_vec = _shape_vector(leader_shape)
+    threat_shape_vec = _shape_vector(threat_shape)
     for pol in LEADER_POLICIES:
         deploy_lap = start_lap + pol["deploy_offset"]
         preset = pol.get("preset")
@@ -840,7 +1001,8 @@ def evaluate_leader_policies(
                 gap_before_s, tyres, year, cbatt, lbatt,
                 (lever if pol.get("preset") is None else 0.0)
                 if preset is None else 0.0,
-                preset=preset)
+                preset=preset, leader_shape=leader_shape_vec,
+                threat_shape=threat_shape_vec)
             summ = sim["summary"]
             wear_delta = _est_extra_wear(
                 lever if preset is None else 0.0,
@@ -851,7 +1013,8 @@ def evaluate_leader_policies(
             # counter-deploy.  Phase 2 inherits the REAL phase-1 gap/SOC.
             sim1, ms1 = _leader_walk(
                 leader_code, chaser_code, track_name, start_lap, deploy_lap,
-                gap_before_s, tyres, year, cbatt, lbatt, lever)
+                gap_before_s, tyres, year, cbatt, lbatt, lever,
+                leader_shape=leader_shape_vec, threat_shape=threat_shape_vec)
             gap2, c_age2, l_age2 = _phase2_gap(sim1, deploy_lap)
             soc1 = sim1.get("summary", {}).get("leader_soc_end_pct")
             batt2 = soc1 if soc1 is not None else lbatt
@@ -867,7 +1030,8 @@ def evaluate_leader_policies(
             sim2, ms2 = _leader_walk(
                 leader_code, chaser_code, track_name, deploy_lap + 1,
                 race_length, gap2, tyres2, year, cbatt, batt2,
-                pol.get("strike_lever") or 0.0)
+                pol.get("strike_lever") or 0.0,
+                leader_shape=leader_shape_vec, threat_shape=threat_shape_vec)
             # Wear per phase on the LEADER's compound: the concede/bank
             # phase burns nothing (lever <= 0), the counter-strike pays.
             wear_delta = (
@@ -897,6 +1061,14 @@ def evaluate_leader_policies(
         soc_rows += summ.get("_phase1_soc_rows", [])
         min_soc_pct = min(soc_rows) if soc_rows else None
         soc_end_pct = summ.get("leader_soc_end_pct")
+        # Store-neutral rows: a hold asks no lever, but its SOC walk is
+        # still ON ([0, 0, 0] posture) — the projected store is modelled
+        # and reported (an honest NEGATIVE margin when the car already
+        # sits below the target).  The store path is untouched, so a
+        # no-spend posture is never priced as a reserve breach: the
+        # breach rule rejects policies that SPEND below the target.
+        if soc_end_pct is None:
+            soc_end_pct = round(min(100.0, lbatt), 1)
         deployed = summ.get("leader_defense", {}) or {}
         deployed_mj = float(deployed.get("deployed_mj", 0.0))
         banked_mj = float(deployed.get("banked_mj", 0.0))
@@ -905,7 +1077,11 @@ def evaluate_leader_policies(
 
         drained = (min_soc_pct is not None
                    and min_soc_pct <= LIVE_ATTACK_MIN_SOC_PCT + 0.05)
-        reserve_breach = (min_soc_pct is not None
+        # Mirror of the chaser rule: the reserve bar rejects defences
+        # that SPEND below the target; a zero-spend hold never dips, so
+        # it stays recommendable (honest negative margin when below).
+        no_spend = deployed_mj <= 1e-9 and banked_mj <= 1e-9
+        reserve_breach = (min_soc_pct is not None and not no_spend
                           and min_soc_pct < _battery_pct(reserve) - 0.05)
 
         # Worst-case battery prices the cost terms (same rule as chaser).
@@ -985,6 +1161,12 @@ def evaluate_leader_policies(
                  "the door reopens exactly where defence is needed"
                  if drained else None)),
             "phase_laps_ms": round(ms_total, 1),
+            # The strategist's own slider bank as walked, disclosed like
+            # the chaser engine's ers_shape.
+            "ers_shape": (list(leader_shape_vec)
+                          if leader_shape_vec is not None else None),
+            "threat_shape": (list(threat_shape_vec)
+                             if threat_shape_vec is not None else None),
         })
         if pol["name"] == "HOLD & MANAGE":
             base_summ = summ
@@ -992,8 +1174,14 @@ def evaluate_leader_policies(
     feasible = [r for r in rows if r["feasible"]]
     ranked = sorted(feasible or rows, key=lambda r: r["score_s"])
     best, second = (ranked[0], ranked[1] if len(ranked) > 1 else None)
-    margin = ((second["score_s"] - best["score_s"])
-              if second is not None else CONFIDENCE_SPAN_S)
+    # Decision margin = the gap to the next DISTINCT score (a duplicated
+    # score mirrors the same walk — it is not an alternative plan).
+    next_scores = [r["score_s"] for r in ranked[1:]
+                   if r["score_s"] > best["score_s"] + 1e-9]
+    margin = ((min(next_scores) - best["score_s"])
+              if next_scores else
+              ((second["score_s"] - best["score_s"])
+               if second is not None else CONFIDENCE_SPAN_S))
     band_mult = 1.0 - 0.4 * ((band["band_pct"] - band["floor_pct"])
                              / max(1e-9, band["cap_pct"]
                                    - band["floor_pct"]))
@@ -1040,6 +1228,10 @@ def evaluate_leader_policies(
             "race_length": race_length, "gap_before_s": gap_before_s,
             "tyres": tyres, "year": year,
             "battery_pct": lbatt,
+            "ers_shape": (list(leader_shape_vec)
+                          if leader_shape_vec is not None else None),
+            "threat_shape": (list(threat_shape_vec)
+                             if threat_shape_vec is not None else None),
             "battery_band_pct": band["band_pct"],
             "battery_range_pct": [round(max(0.0, lbatt - band["band_pct"]), 1),
                                    round(min(100.0, lbatt + band["band_pct"]), 1)],
@@ -1167,12 +1359,21 @@ def evaluate_call(
         battery_pct: float | None = None,
         threat_battery_pct: float | None = None,
         reserve_target_mj: float | None = None,
-        perspective: str = "chaser") -> dict[str, Any]:
+        perspective: str = "chaser",
+        chaser_shape=None, leader_shape=None) -> dict[str, Any]:
     """One merged call: both engines run, coupled, one decision out.
 
     ``battery_pct`` is OUR car's battery (the seat's own car) and
     ``threat_battery_pct`` the other car's — the caller does not have to
     know which engine consumes which, the seat decides that mapping.
+
+    ``chaser_shape`` / ``leader_shape`` are the strategist's per-sector
+    slider banks (Energy Sandbox vocabulary, MJ/lap per sector, clamped
+    to +-8.5).  The chaser bank rides every chaser-engine walk and the
+    leader bank every leader-engine walk; each engine's recommendation
+    carries the shapes it was scored under, and the cache keys on the
+    normalised vectors so a changed slider bank can never serve a stale
+    call.
 
     Returns the single ``final_call`` card for the chosen seat (carrying the
     opponent engine's answer and the projected race window), every policy
@@ -1192,6 +1393,8 @@ def evaluate_call(
         leader_batt, chaser_batt = battery_pct, threat_battery_pct
     else:
         leader_batt, chaser_batt = None, battery_pct
+    chaser_shape_vec = _shape_vector(chaser_shape)
+    leader_shape_vec = _shape_vector(leader_shape)
 
     common = dict(
         leader_code=leader_code, chaser_code=chaser_code,
@@ -1221,13 +1424,15 @@ def evaluate_call(
         chaser_tyre_compound=chaser_tyre_compound,
         leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
         year=year, leader_batt=leader_batt, chaser_batt=chaser_batt,
-        reserve=reserve)
+        reserve=reserve, leader_shape=leader_shape_vec,
+        threat_shape=chaser_shape_vec)
     leader_out = _engine_cache_get(leader_key)
     leader_cached = leader_out is not None
     if leader_out is None:
         leader_out = evaluate_leader_policies(
             **common, leader_battery_pct=leader_batt,
-            chaser_battery_pct=chaser_batt)
+            chaser_battery_pct=chaser_batt,
+            leader_shape=leader_shape_vec, threat_shape=chaser_shape_vec)
         _engine_cache_put(leader_key, leader_out)
 
     # 2. COUPLE the engines: the defence the leader engine recommends sets
@@ -1244,12 +1449,13 @@ def evaluate_call(
         chaser_tyre_compound=chaser_tyre_compound,
         leader_tyre_age=leader_tyre_age, chaser_tyre_age=chaser_tyre_age,
         year=year, leader_batt=leader_batt, chaser_batt=chaser_batt,
-        reserve=reserve, posture=posture)
+        reserve=reserve, posture=posture, chaser_shape=chaser_shape_vec)
     chaser_out = _engine_cache_get(chaser_key)
     chaser_cached = chaser_out is not None
     if chaser_out is None:
         chaser_out = evaluate_tactical_policies(
-            **common, chaser_battery_pct=chaser_batt, leader_posture=posture)
+            **common, chaser_battery_pct=chaser_batt, leader_posture=posture,
+            chaser_shape=chaser_shape_vec)
         _engine_cache_put(chaser_key, chaser_out)
 
     chaser_card = chaser_out["recommendation"]["action_card"]
@@ -1282,7 +1488,15 @@ def evaluate_call(
         "battery_margin_worst_pct": card.get("battery_margin_worst_pct"),
         "soc_band_pct": card.get("soc_band_pct"),
         "confidence": card.get("confidence"),
+        # The surfaced engine's own decision margin (s to the next DISTINCT
+        # score) — the number the confidence is built from, disclosed on the
+        # card so a 0-confidence call can be audited without the payload.
+        "engine_margin_s": own_engine.get("decision_margin_s"),
         "feasible": card.get("feasible"),
+        "ers_shape": (list(chaser_shape_vec)
+                      if chaser_shape_vec is not None else None),
+        "leader_ers_shape": (list(leader_shape_vec)
+                             if leader_shape_vec is not None else None),
         "opponent": {
             "seat": opp_seat,
             "action": opp_card.get("action"),

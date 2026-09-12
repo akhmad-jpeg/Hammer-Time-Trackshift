@@ -697,35 +697,7 @@ function setGapVal(v) {
     htUpdateContext();
 }
 
-function ovSectorDeltas() {
-    return ['ov-d1', 'ov-d2', 'ov-d3'].map(function (id) {
-        const el = document.getElementById(id);
-        return el ? (parseFloat(el.value) || 0) : 0;
-    });
-}
-function ovSectorInput() {
-    const ds = ovSectorDeltas();
-    ['ov-v1', 'ov-v2', 'ov-v3'].forEach(function (id, i) {
-        const el = document.getElementById(id);
-        if (el) el.textContent = (ds[i] >= 0 ? '+' : '') + ds[i].toFixed(2);
-    });
-    const sum = ds.reduce(function (a, b) { return a + b; }, 0);
-    const el = document.getElementById('ov-sum');
-    if (el) {
-        let net = 'pure reallocation — store-neutral, pace shape only';
-        if (sum > 0.005) net = "net deploy from the chaser's 4.0 MJ store (30% floor)";
-        else if (sum < -0.005) net = "net bank to the chaser's 4.0 MJ store (full = stop lifting)";
-        el.textContent = 'Σ Δ = ' + (sum >= 0 ? '+' : '') + sum.toFixed(2) +
-            ' MJ/lap · ' + net + " — each sector's delta worth its own s/MJ";
-    }
-}
-function setOvErsShape(d1, d2, d3) {
-    [['ov-d1', d1], ['ov-d2', d2], ['ov-d3', d3]].forEach(function (pair) {
-        const el = document.getElementById(pair[0]);
-        if (el) el.value = pair[1];
-    });
-    ovSectorInput();
-}
+
 
 function livePct(p) { return Math.round(100 * Math.min(1, Math.max(0, p || 0))); }
 
@@ -878,8 +850,17 @@ function renderLiveCompare(scenarios) {
     // Detailed facts + lap table for the recommended run.
     const laps = r.laps || [];
     const fmtDelta = (d) => (d >= 0 ? '+' : '') + d.toFixed(2);
-    const ersShapeTxt = sc.deltas ? sc.deltas.map((d, i) => 'S' + (i + 1) + ' ' + fmtDelta(d)).join(' · ')
-        + ` (net ${fmtDelta(scNet)} MJ/lap)` : '—';
+    // CHASER ERS SHAPE: the strategist's slider bank as actually walked
+    // (payload-disclosed), falling back to the run's own shape name.
+    const shapeWalked = m.chaser_ers_shape || m.ers_shape || null;
+    const ersShapeTxt = shapeWalked
+        ? 'S1 ' + fmtDelta(shapeWalked[0]) + ' · S2 ' + fmtDelta(shapeWalked[1]) +
+          ' · S3 ' + fmtDelta(shapeWalked[2]) + ' (net ' +
+          fmtDelta(shapeWalked.reduce((a, b) => a + b, 0)) + ' MJ/lap — your slider bank, policy-scaled)'
+        : (sc.deltas && (sc.deltas[0] || sc.deltas[1] || sc.deltas[2])
+            ? sc.deltas.map((d, i) => 'S' + (i + 1) + ' ' + fmtDelta(d)).join(' · ')
+              + ` (net ${fmtDelta(scNet)} MJ/lap)`
+            : 'flat preset lever');
     const facts = [
         ['BATTERY START', battStart + (battOverridePct != null
             ? ' (your input — 30% floor enforced)'
